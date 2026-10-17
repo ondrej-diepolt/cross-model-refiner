@@ -44,7 +44,7 @@ Výsledky jsou ve složce `output/<datum_čas_název-poptávky>/`:
 | Soubor | Obsah |
 |---|---|
 | `prehled.html` | přehled běhu – začněte tady |
-| `FINALNI_nabidka.docx`, `FINALNI_nabidka.md` | finální dokument (verze s nejvyšším skóre) |
+| `FINALNI_nabidka.docx`, `FINALNI_nabidka.md` | finální dokument (verze s nejvyšším skóre); u profilu směrnice `FINALNI_smernice.*` – obecně `FINALNI_<profil>.*` |
 | `01_poptavka.md` | poptávka převedená do textu – co modely skutečně viděly |
 | `02_nalezitosti.md` | povinné náležitosti vytažené z poptávky |
 | `03_navrh_v1.md`, `06_navrh_v2.md`… | jednotlivé verze dokumentu |

@@ -37,8 +37,12 @@ def _jediny_beh(koren: Path) -> Beh:
     return Beh.otevri(slozky[0])
 
 
+class _NecekanyDotaz(BaseException):
+    """BaseException, aby ji nespolkl `except Exception` v cli a test nečekaného dotazu selhal."""
+
+
 def _nepouzivat(_):
-    raise AssertionError("vstup_fn se neměl volat")
+    raise _NecekanyDotaz("vstup_fn se neměl volat")
 
 
 # ---------------------------------------------------------------- celý běh
@@ -134,6 +138,27 @@ def test_klic_z_env_souboru(koren):
         os.environ.pop("ANTHROPIC_API_KEY", None)
         os.environ.pop("OPENAI_API_KEY", None)
     assert pouzite == [False]
+
+
+@pytest.mark.parametrize("kodovani", ["cp1250", "utf-16"])
+def test_env_v_jinem_kodovani_je_kod_2(koren, kodovani):
+    (koren / ".env").write_text("# Klíče k API\nANTHROPIC_API_KEY=a\nOPENAI_API_KEY=b\n",
+                                encoding=kodovani)
+    out = io.StringIO()
+    try:
+        assert main([], koren=koren, vstup_fn=_nepouzivat, vystup=out) == 2
+    finally:
+        os.environ.pop("ANTHROPIC_API_KEY", None)
+        os.environ.pop("OPENAI_API_KEY", None)
+    assert "Soubor .env nelze přečíst" in out.getvalue() and "UTF-8" in out.getvalue()
+    assert not (koren / "output").exists()
+
+
+def test_nepouzivat_neni_spolknuto(koren):
+    """Pojistka testů: nečekaný dotaz na vstup se nesmí ztratit v obecném zachycení chyb."""
+    (koren / "input" / "druha.md").write_text(POPTAVKA_TEST, encoding="utf-8")
+    with pytest.raises(_NecekanyDotaz):
+        main(["--nanecisto"], koren=koren, vstup_fn=_nepouzivat, vystup=io.StringIO())
 
 
 def test_prazdny_input(koren):

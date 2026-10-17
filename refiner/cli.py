@@ -37,6 +37,7 @@ KOREN = Path(__file__).resolve().parent.parent
 KLICE: tuple[tuple[str, Sluzba], ...] = (("ANTHROPIC_API_KEY", "Anthropic"), ("OPENAI_API_KEY", "OpenAI"))
 
 HLASKA_VZOR_ENV = "Vzor najdete v souboru .env.example."
+HLASKA_ENV_KODOVANI = "Soubor .env nelze přečíst – uložte ho v kódování UTF-8."
 HLASKA_ZADNY_VSTUP = "Ve složce input/ není žádná poptávka (DOCX, MD nebo TXT)."
 HLASKA_ZADNY_PROFIL = "Ve složce profily/ není žádný profil dokumentu (*.yaml)."
 HLASKA_ZADNY_PRERUSENY = "Ve složce output/ není žádný přerušený běh, ve kterém by šlo pokračovat."
@@ -65,7 +66,7 @@ class _Konzole:
     """Jediné místo, kudy jdou hlášky do konzole; po každém zápisu flush().
 
     Hláška končící „…“ zůstane rozepsaná na řádku a následné „hotovo…“ se připíše za ni
-    (`[4/12] Hodnocení 1… hotovo, skóre 7,9`).
+    (`[3/12] Hodnocení 1… hotovo, skóre 7,9`).
     """
 
     def __init__(self, proud: TextIO | None):
@@ -211,7 +212,11 @@ def _spust(
     tovarna: TovarnaModelu,
     otevrit_prehled: bool,
 ) -> int:
-    load_dotenv(koren / ".env")
+    try:
+        load_dotenv(koren / ".env", encoding="utf-8")
+    except (UnicodeDecodeError, OSError):   # .env uložený v ANSI/cp1250 nebo UTF-16
+        konzole(HLASKA_ENV_KODOVANI)
+        return 2
     if args.nanecisto:
         konzole(HLASKA_NANECISTO)
     else:
