@@ -1,0 +1,31 @@
+# Zárodek profilu pro interní směrnici - nevyladěno.
+nazev: Směrnice
+typ_dokumentu: interní směrnice
+pokyny_struktura: |
+  Doporučená osnova směrnice: účel a působnost, definice, role a odpovědnosti,
+  postupy, kontrolní mechanismy, soulad s předpisy, závěrečná ustanovení.
+kriteria:
+  - id: S1
+    nazev: Účel a působnost
+    popis: Směrnice jasně říká, k čemu slouží a koho a co se týká.
+    vaha: 0.20
+  - id: S2
+    nazev: Role a odpovědnosti
+    popis: Jsou určeny role, jejich odpovědnosti a pravomoci.
+    vaha: 0.20
+  - id: S3
+    nazev: Postupy
+    popis: Postupy jsou popsány krok za krokem a lze se podle nich řídit.
+    vaha: 0.20
+  - id: S4
+    nazev: Kontrolní mechanismy
+    popis: Je popsáno, jak se dodržování kontroluje a jak se řeší porušení.
+    vaha: 0.15
+  - id: S5
+    nazev: Soulad s předpisy
+    popis: Směrnice odkazuje na relevantní předpisy a není s nimi v rozporu.
+    vaha: 0.15
+  - id: S6
+    nazev: Jazyk a forma
+    popis: Srozumitelná spisovná čeština, jednoznačné formulace, jednotná terminologie.
+    vaha: 0.10
