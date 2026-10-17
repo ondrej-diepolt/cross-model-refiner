@@ -17,12 +17,16 @@ HLASKY: dict[DruhChyby, str] = {
     "sit": "Nepodařilo se spojit se službou {sluzba}. Zkontrolujte připojení a spusťte pokracovat.bat.",
     "timeout": "Služba {sluzba} neodpověděla včas. Zkuste to znovu přes pokracovat.bat.",
     "nevalidni_vystup": "Model {sluzba} vrátil neplatnou odpověď ani po opravě. Surová odpověď je ve složce data/.",
-    "uriznuto": "Odpověď modelu {sluzba} byla uříznutá (příliš dlouhá) ani po opakování.",
+    "uriznuto": ("Odpověď modelu {sluzba} byla uříznutá (příliš dlouhá). Zvyšte v souboru "
+                 "nastaveni.yaml limit {limit} a spusťte pokracovat.bat."),
     "odmitnuti": "Model {sluzba} úlohu odmítl (kategorie: {detail}).",
     "jina": "Neočekávaná chyba služby {sluzba}: {detail}",
 }
 
 _KLICE = {"Anthropic": "ANTHROPIC_API_KEY", "OpenAI": "OPENAI_API_KEY"}
+# Položky nastaveni.yaml omezující délku odpovědi (pokračující běh je bere z repozitáře).
+_LIMITY = {"Anthropic": "max_tokens_json (u textu max_tokens_text) v oddílu modely.claude",
+           "OpenAI": "max_output_tokens v oddílu modely.gpt"}
 
 
 class ChybaModelu(Exception):
@@ -32,7 +36,8 @@ class ChybaModelu(Exception):
         self.sluzba = sluzba
         self.detail = detail
         self.surova_odpoved = surova_odpoved
-        self.hlaska = HLASKY[druh].format(klic=_KLICE[sluzba], sluzba=sluzba, detail=detail)
+        self.hlaska = HLASKY[druh].format(klic=_KLICE[sluzba], sluzba=sluzba, detail=detail,
+                                          limit=_LIMITY[sluzba])
         super().__init__(self.hlaska)
 
 

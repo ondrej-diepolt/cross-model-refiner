@@ -93,7 +93,7 @@ def spust_smycku(
     odmitnute: list[tuple[Navrh, Rozhodnuti]] = []
 
     def konec(duvod: DuvodUkonceni) -> VysledekBehu:
-        finalni = vyber_finalni({verze: s.celkem for verze, s in skore.items()})
+        finalni = vyber_finalni(skore)
         return VysledekBehu(duvod=duvod, finalni_verze=finalni, skore=dict(skore))
 
     k = 1

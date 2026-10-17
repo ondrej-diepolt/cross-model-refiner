@@ -92,8 +92,15 @@ class VysledekSkore(BaseModel):
 
 
 class Spotreba(BaseModel):
+    """Spotřeba tokenů jednoho volání (neposílá se modelu, výchozí hodnoty jsou v pořádku).
+
+    Anthropic: `vstup` nezahrnuje čtení ani zápis cache. OpenAI: `cache_cteni` je podmnožina
+    `vstup`, `cache_zapis` je vždy 0.
+    """
+
     krok: str
     model: str
     vstup: int
     vystup: int
     cache_cteni: int = 0
+    cache_zapis: int = 0

@@ -33,10 +33,16 @@ class Profil(_Model):
     kriteria: list[KriteriumProfilu]
 
 
+# Povolené hodnoty effortu podle typů SDK (ověřeno v anthropic 1.15.0: OutputConfigParam.effort;
+# openai 3.33.0: shared.ReasoningEffort). Překlep tak selže už při načtení konfigurace.
+EffortClaude = Literal["low", "medium", "high", "xhigh", "max"]
+EffortGpt = Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+
+
 class NastaveniClaude(_Model):
     model: str
-    effort: str
-    effort_extrakce: str
+    effort: EffortClaude
+    effort_extrakce: EffortClaude
     max_tokens_text: int
     max_tokens_json: int
     fallback: bool
@@ -44,7 +50,7 @@ class NastaveniClaude(_Model):
 
 class NastaveniGpt(_Model):
     model: str
-    effort: str
+    effort: EffortGpt
     max_output_tokens: int
 
 
@@ -145,7 +151,8 @@ def _cesky(err: dict) -> str:
     if typ == "greater_than_equal":
         return f"musí být alespoň {err['ctx']['ge']}"
     if typ == "literal_error":
-        return f"musí být jedna z: {err['ctx']['expected']}"
+        moznosti = str(err["ctx"]["expected"]).replace(" or ", " nebo ")
+        return f"‚{err.get('input')}‘ není povolená hodnota, musí být jedna z: {moznosti}"
     return err["msg"]
 
 
@@ -177,7 +184,8 @@ def _zkontroluj_id(kriteria: list[KriteriumProfilu], soubor: Path, koren, cesta:
 
 # ---------------------------------------------------------------- veřejné rozhraní
 
-def nacti_konfiguraci(nastaveni: Path, profil: Path, kriteria: Path | None = None) -> Konfigurace:
+def nacti_nastaveni(nastaveni: Path) -> Nastaveni:
+    """Načte a zkontroluje samotný nastaveni.yaml (bez profilu)."""
     nast, koren_n = _validuj(Nastaveni, nastaveni)
     soucet = sum(nast.vahy_skupin.values())
     if abs(soucet - 1.0) > TOLERANCE_SOUCTU or set(nast.vahy_skupin) != {"A", "B", "C"}:
@@ -187,6 +195,11 @@ def nacti_konfiguraci(nastaveni: Path, profil: Path, kriteria: Path | None = Non
             "vahy_skupin",
             f"váhy skupin A, B, C musí mít součet 1, je {soucet:g}",
         )
+    return nast
+
+
+def nacti_konfiguraci(nastaveni: Path, profil: Path, kriteria: Path | None = None) -> Konfigurace:
+    nast = nacti_nastaveni(nastaveni)
 
     prof, koren_p = _validuj(Profil, profil)
     _zkontroluj_id(prof.kriteria, profil, koren_p, "kriteria")

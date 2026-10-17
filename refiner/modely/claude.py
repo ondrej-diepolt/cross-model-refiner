@@ -61,7 +61,8 @@ class ClaudeModel:
         u = msg.usage
         self._spotreba.append(Spotreba(
             krok=krok, model=self.nazev, vstup=u.input_tokens, vystup=u.output_tokens,
-            cache_cteni=u.cache_read_input_tokens or 0))
+            cache_cteni=u.cache_read_input_tokens or 0,
+            cache_zapis=getattr(u, "cache_creation_input_tokens", None) or 0))
         if msg.stop_reason == "refusal":
             kategorie = getattr(getattr(msg, "stop_details", None), "category", None)
             raise ChybaModelu("odmitnuti", _SLUZBA, detail=str(kategorie or "nespecifikováno"))
@@ -72,8 +73,13 @@ class ClaudeModel:
              effort: str | None = None) -> T:
         kw = self._spolecne(instrukce, zadani, effort)
         try:
-            msg = self._klient.beta.messages.parse(
-                **kw, max_tokens=self._n.claude.max_tokens_json, output_format=schema)
+            # Stream i pro JSON: thinking tokeny se počítají do max_tokens, takže limit musí
+            # být vysoký, a SDK nestreamované volání s vysokým max_tokens odmítá (dlouhé volání).
+            # Ověřeno v anthropic 1.15.0: BetaMessageStream přijímá output_format a vyplní
+            # parsed_output (parsuje při content_block_stop – chyby parsování vzniknou při čtení).
+            with self._klient.beta.messages.stream(
+                    **kw, max_tokens=self._n.claude.max_tokens_json, output_format=schema) as proud:
+                msg = proud.get_final_message()
             self._zpracuj(msg, krok)
             if msg.parsed_output is None:
                 raise ChybaModelu("nevalidni_vystup", _SLUZBA, detail="chybí parsed_output",

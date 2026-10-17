@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 import refiner.aplikace as aplikace
-from refiner.aplikace import dokonci, najdi_posledni_beh, obnov_beh, zahaj_beh
+from refiner.aplikace import dokonci, najdi_posledni_beh, obnov_beh, otevri_dokonceny, zahaj_beh
 from refiner.beh import Beh
 from refiner.modely.chyby import ChybaModelu
 from refiner.modely.falesne import FalesnyModel
@@ -93,6 +93,75 @@ def test_obnoveni_pouzije_kopii_konfigurace(koren):
     assert z2.poptavka == POPTAVKA_TEST
     # obnovení nepřepisuje existující kroky
     assert list(beh2.stav.kroky) == ["poptavka"] and beh2.stav.kroky["poptavka"].cislo == 1
+
+
+def _uprav(soubor: Path, *nahrady: tuple[str, str]) -> None:
+    text = soubor.read_text(encoding="utf-8")
+    for a, b in nahrady:
+        assert a in text
+        text = text.replace(a, b)
+    soubor.write_text(text, encoding="utf-8")
+
+
+def test_obnoveni_s_korenem_bere_modely_a_ceny_z_repozitare(koren):
+    beh, _ = _zahaj(koren)
+    _uprav(koren / "nastaveni.yaml",
+           ("max_tokens_json: 32000", "max_tokens_json: 50000"),
+           ("max_output_tokens: 64000", "max_output_tokens: 99000"),
+           ("claude-opus-5-5: {vstup: 4.0", "claude-opus-5-5: {vstup: 7.0"),
+           ("max_revizi: 3", "max_revizi: 1"))
+    (koren / "prompty" / "navrh.md").write_text("ZMĚNĚNO", encoding="utf-8")
+    hlasky: list[str] = []
+
+    _, z = obnov_beh(beh.slozka, koren=koren, hlaseni=hlasky.append)
+
+    n = z.konfigurace.nastaveni
+    assert n.modely.claude.max_tokens_json == 50000 and n.modely.gpt.max_output_tokens == 99000
+    assert n.ceny_usd_za_milion["claude-opus-5-5"].vstup == 7.0
+    # Smyčka, profil a prompty zůstávají z kopie běhu (reprodukovatelné skóre).
+    assert n.smycka.max_revizi == 3
+    assert (z.prompty / "navrh.md").read_text(encoding="utf-8") != "ZMĚNĚNO"
+    log = (beh.slozka / "data" / "beh.log").read_text(encoding="utf-8")
+    assert "modely" in log and "nastaveni.yaml" in log and "kopie" in log
+    # Kopie konfigurace ve složce běhu se nemění.
+    assert "max_tokens_json: 32000" in (beh.slozka / "data" / "konfigurace" / "nastaveni.yaml") \
+        .read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("pokazit", ["smazat", "neplatny"])
+def test_obnoveni_s_vadnym_nastavenim_v_repozitari_pouzije_kopii(koren, pokazit):
+    beh, _ = _zahaj(koren)
+    nastaveni = koren / "nastaveni.yaml"
+    if pokazit == "smazat":
+        nastaveni.unlink()
+    else:
+        _uprav(nastaveni, ("effort: high", "effort: hihg"))
+    hlasky: list[str] = []
+
+    _, z = obnov_beh(beh.slozka, koren=koren, hlaseni=hlasky.append)
+
+    assert z.konfigurace.nastaveni.modely.claude.max_tokens_json == 32000
+    assert any("Varování" in h and "kopie" in h for h in hlasky)
+    log = (beh.slozka / "data" / "beh.log").read_text(encoding="utf-8")
+    assert "WARNING" in log and "nastaveni.yaml" in log
+
+
+def test_obnoveni_rezim_musi_odpovidat(koren):
+    beh, _ = _zahaj(koren)
+    with pytest.raises(ChybaVstupu, match="--nanecisto"):
+        obnov_beh(beh.slozka, nanecisto=True)
+    demo, _ = zahaj_beh(koren, koren / "input" / "poptavka.md", "nabidka", T, nanecisto=True)
+    assert demo.stav.nanecisto
+    with pytest.raises(ChybaVstupu, match="ukázkový"):
+        obnov_beh(demo.slozka, nanecisto=False)
+    assert obnov_beh(demo.slozka, nanecisto=True)[0].slozka == demo.slozka
+
+
+def test_porovnani_odmitne_ukazkovy_beh(koren):
+    demo, z = zahaj_beh(koren, koren / "input" / "poptavka.md", "nabidka", T, nanecisto=True)
+    assert dokonci(demo, z, *skript([9.5]), hlaseni=lambda _: None, sablona=None) == 0
+    with pytest.raises(ChybaVstupu, match="ukázkový"):
+        otevri_dokonceny(demo.slozka, nanecisto=False)
 
 
 def test_obnoveni_dokonceneho_behu_odmitne(koren):
@@ -257,3 +326,15 @@ def test_najdi_posledni_preruseny(koren):
     assert najdi_posledni_beh(output, {"prerusen", "bezi"}) == novy.slozka
     assert najdi_posledni_beh(output, {"dokoncen"}) == hotovy.slozka
     assert najdi_posledni_beh(output, {"bezi"}) is None
+
+
+def test_najdi_posledni_beh_preskoci_jiny_rezim(koren):
+    output = koren / "output"
+    ostry, _ = _zahaj(koren, datetime(2026, 10, 17, 8, 0))
+    ostry.ukonci("prerusen", chyba="x")
+    demo, _ = zahaj_beh(koren, koren / "input" / "poptavka.md", "nabidka",
+                        datetime(2026, 10, 17, 10, 0), nanecisto=True)
+    demo.ukonci("prerusen", chyba="x")
+    assert najdi_posledni_beh(output, {"prerusen"}) == demo.slozka
+    assert najdi_posledni_beh(output, {"prerusen"}, nanecisto=False) == ostry.slozka
+    assert najdi_posledni_beh(output, {"prerusen"}, nanecisto=True) == demo.slozka

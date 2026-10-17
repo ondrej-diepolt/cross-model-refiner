@@ -283,6 +283,31 @@ def test_prepis_zkraceni_s_navrhem():
     assert zkontroluj_prepis(stary, novy, h, posouzeni(h)) == []
 
 
+@pytest.mark.parametrize("text", [
+    "Odstraňte duplicitní odstavec v kap. 2.",
+    "zkrať úvod na tři věty",
+    "ZKRAŤTE shrnutí.",
+    "Vypusťte kapitolu 4.",
+    "Smažte opakovaný popis týmu.",
+    "Zrušte přílohu B.",
+])
+def test_prepis_zkraceni_s_navrhem_s_diakritikou(text):
+    h = hodnoceni(8, navrhy=1)
+    h.navrhy[0].navrh = text
+    stary = "# A\n" + "x" * 196
+    novy = "# A\n" + "x" * 96
+    assert zkontroluj_prepis(stary, novy, h, posouzeni(h)) == []
+
+
+def test_prepis_zkraceni_jak_zapracovat_s_diakritikou():
+    h = hodnoceni(8, navrhy=1)
+    p = posouzeni(h)
+    p.rozhodnuti[0].jak_zapracovat = "Odstraň opakovaný odstavec."
+    stary = "# A\n" + "x" * 196
+    novy = "# A\n" + "x" * 96
+    assert zkontroluj_prepis(stary, novy, h, p) == []
+
+
 def test_prepis_zkraceni_s_odmitnutym_navrhem_neplati():
     h = hodnoceni(8, navrhy=1)
     h.navrhy[0].navrh = "Odstranit kap. 3."

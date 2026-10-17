@@ -107,13 +107,32 @@ def _tabulka(beh: Beh, konf: Konfigurace, hodnoceni: dict[int, Hodnoceni], cisla
     return radky
 
 
+# Násobky ceny vstupu za tokeny z cache (orientační odhad, v přehledu označený jako odhad).
+# Anthropic: zápis do cache (5 min) 1,25×, čtení 0,1×; `input_tokens` cache nezahrnuje.
+# OpenAI: čtení z cache 0,5× – PŘEDPOKLAD (sleva se liší podle modelu); `input_tokens`
+# tokeny z cache zahrnuje (cached_tokens jsou jejich podmnožina), zápis se neúčtuje.
+NASOBEK_ZAPIS_CACHE_ANTHROPIC = 1.25
+NASOBEK_CTENI_CACHE_ANTHROPIC = 0.1
+NASOBEK_CTENI_CACHE_OPENAI = 0.5
+
+
+def _je_openai(model: str) -> bool:
+    """Poskytovatel podle názvu modelu – stejně jako v kroky.py."""
+    return model.lower().startswith("gpt")
+
+
 def _cena(spotreba: list[Spotreba], konf: Konfigurace) -> dict:
+    """Souhrn po modelech; `vstup` v řádcích je vždy vstup bez tokenů z cache (u obou služeb)."""
     ceny = konf.nastaveni.ceny_usd_za_milion
     souhrn: dict[str, dict] = {}
     for s in spotreba:
-        r = souhrn.setdefault(s.model, {"model": s.model, "vstup": 0, "vystup": 0})
-        r["vstup"] += s.vstup
+        r = souhrn.setdefault(s.model, {"model": s.model, "vstup": 0, "vystup": 0,
+                                        "cache_cteni": 0, "cache_zapis": 0})
+        # OpenAI počítá tokeny z cache do vstupu; Anthropic ne.
+        r["vstup"] += s.vstup - s.cache_cteni if _je_openai(s.model) else s.vstup
         r["vystup"] += s.vystup
+        r["cache_cteni"] += s.cache_cteni
+        r["cache_zapis"] += s.cache_zapis
     celkem = 0.0
     neznama = False
     radky = []
@@ -123,13 +142,18 @@ def _cena(spotreba: list[Spotreba], konf: Konfigurace) -> dict:
             neznama = True
             cena_txt = "cena neznámá"
         else:
-            cena = (r["vstup"] * c.vstup + r["vystup"] * c.vystup) / 1_000_000
+            if _je_openai(r["model"]):
+                cache = r["cache_cteni"] * NASOBEK_CTENI_CACHE_OPENAI * c.vstup
+            else:
+                cache = (r["cache_cteni"] * NASOBEK_CTENI_CACHE_ANTHROPIC
+                         + r["cache_zapis"] * NASOBEK_ZAPIS_CACHE_ANTHROPIC) * c.vstup
+            cena = (r["vstup"] * c.vstup + cache + r["vystup"] * c.vystup) / 1_000_000
             celkem += cena
             cena_txt = f"{_desetinne(cena)} USD"
         radky.append({**r, "cena": cena_txt})
     return {
         "radky": radky, "celkem": _desetinne(celkem), "neznama": neznama,
-        "vstup": sum(r["vstup"] for r in radky), "vystup": sum(r["vystup"] for r in radky),
+        **{k: sum(r[k] for r in radky) for k in ("vstup", "vystup", "cache_cteni", "cache_zapis")},
     }
 
 
@@ -173,10 +197,18 @@ def vytvor_prehled(beh: Beh, konfigurace: Konfigurace) -> Path:
     vysvetleni = None
     if finalni is not None and fin_skore and posledni is not None and finalni != posledni \
             and posledni in skore:
-        vysvetleni = (
-            f"Finální je verze {finalni}, ne poslední verze {posledni}: verze {finalni} má vyšší skóre "
-            f"({format_skore(fin_skore.celkem)}) než verze {posledni} ({format_skore(skore[posledni].celkem)})."
-        )
+        # Pořadí výběru (skore.vyber_finalni): splněný cíl, pak nejvyšší skóre, pak pozdější verze.
+        if fin_skore.cil_splnen and not skore[posledni].cil_splnen:
+            vysvetleni = (
+                f"Finální je verze {finalni}, ne poslední verze {posledni}: verze {finalni} splnila cíl, "
+                f"verze {posledni} ne ({'; '.join(skore[posledni].duvody_nesplneni)})."
+            )
+        else:
+            vysvetleni = (
+                f"Finální je verze {finalni}, ne poslední verze {posledni}: verze {finalni} má vyšší "
+                f"skóre ({format_skore(fin_skore.celkem)}) než verze {posledni} "
+                f"({format_skore(skore[posledni].celkem)})."
+            )
 
     placeholdery: list[str] = []
     podezrele: list[dict] = []

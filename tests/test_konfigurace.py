@@ -50,6 +50,9 @@ def test_nacte_repo_konfiguraci(koren_repa):
     k = nacti_konfiguraci(koren_repa / "nastaveni.yaml", koren_repa / "profily" / "nabidka.yaml")
     assert k.nastaveni.smycka.cilove_skore == 9.5 and k.nastaveni.smycka.max_revizi == 3
     assert k.nastaveni.modely.claude.model == "claude-opus-5-5"
+    # Uvažování se počítá do limitů výstupu; nízké limity končily uříznutou odpovědí.
+    assert k.nastaveni.modely.claude.max_tokens_json == 32000
+    assert k.nastaveni.modely.gpt.max_output_tokens == 64000 and k.nastaveni.modely.timeout_s == 1800
     assert [c.id for c in k.kriteria_profilu] == ["B1", "B2", "B3", "B4", "B5", "B6"]
     assert k.profil_nazev == "nabidka"
 
@@ -95,6 +98,31 @@ def test_chybejici_povinna_polozka(tmp_path):
         nacti_konfiguraci(nast, _profil(tmp_path))
     assert "chybí povinná položka" in str(e.value) and "cilove_skore" in str(e.value)
     assert "nastaveni.yaml" in str(e.value)
+
+
+@pytest.mark.parametrize("puvodni,preklep,cesta", [
+    ("claude: {model: c, effort: high", "claude: {model: c, effort: hihg", "modely.claude.effort"),
+    ("effort_extrakce: medium", "effort_extrakce: stredni", "modely.claude.effort_extrakce"),
+    ("gpt: {model: g, effort: high", "gpt: {model: g, effort: maximum", "modely.gpt.effort"),
+    # „minimal“ zná jen OpenAI, ne Anthropic.
+    ("claude: {model: c, effort: high", "claude: {model: c, effort: minimal", "modely.claude.effort"),
+])
+def test_neplatny_effort_hlasi_cesky(tmp_path, puvodni, preklep, cesta):
+    nast = _nastaveni(tmp_path, {puvodni: preklep})
+    with pytest.raises(ChybaKonfigurace) as e:
+        nacti_konfiguraci(nast, _profil(tmp_path))
+    zprava = str(e.value)
+    assert "nastaveni.yaml, řádek" in zprava and cesta in zprava
+    assert "musí být jedna z" in zprava and "'xhigh' nebo 'max'" in zprava
+    assert " or " not in zprava
+
+
+def test_effort_hodnoty_podle_sdk(tmp_path):
+    nast = _nastaveni(tmp_path, {"claude: {model: c, effort: high": "claude: {model: c, effort: xhigh",
+                                 "gpt: {model: g, effort: high": "gpt: {model: g, effort: minimal"})
+    k = nacti_konfiguraci(nast, _profil(tmp_path))
+    assert k.nastaveni.modely.claude.effort == "xhigh"
+    assert k.nastaveni.modely.gpt.effort == "minimal"
 
 
 def test_vahy_skupin_musi_dat_soucet_1(tmp_path):

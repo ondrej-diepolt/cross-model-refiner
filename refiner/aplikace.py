@@ -12,7 +12,13 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from refiner.beh import SLOZKA_KONFIGURACE, Beh
-from refiner.konfigurace import ChybaKonfigurace, cesta_kriterii_k_poptavce, nacti_konfiguraci
+from refiner.konfigurace import (
+    ChybaKonfigurace,
+    Konfigurace,
+    cesta_kriterii_k_poptavce,
+    nacti_konfiguraci,
+    nacti_nastaveni,
+)
 from refiner.kroky import Zdroje
 from refiner.modely.chyby import ChybaModelu
 from refiner.modely.rozhrani import Model
@@ -36,8 +42,43 @@ HLASKA_POROVNAT_ZNOVU = "Stav běhu se nezměnil; porovnání zopakujete spušt�
 
 # ---------------------------------------------------------------- zahájení a obnovení
 
-def _nacti_zdroje(beh: Beh) -> Zdroje:
-    """Zdroje výhradně z kopií ve složce běhu (konfigurace, prompty, poptávka, podklady)."""
+def _modely_z_repozitare(
+    beh: Beh,
+    konfigurace: Konfigurace,
+    koren: Path,
+    hlaseni: Callable[[str], None] | None,
+) -> Konfigurace:
+    """Nahradí oddíly `modely` a `ceny_usd_za_milion` hodnotami z aktuálního koren/nastaveni.yaml.
+
+    Opravené nastavení modelů (limity tokenů, časový limit, název modelu) se tak projeví
+    i v pokračujícím běhu. Smyčka, váhy, profil a prompty zůstávají z kopie běhu, aby skóre
+    zůstalo reprodukovatelné. Vadný nebo chybějící soubor v repozitáři → kopie běhu s varováním.
+    """
+    soubor = koren / "nastaveni.yaml"
+    with _log_behu(beh):
+        try:
+            aktualni = nacti_nastaveni(soubor)
+        except ChybaKonfigurace as e:
+            zprava = (f"Varování: nastavení modelů z {soubor} nelze použít ({e}); běh pokračuje "
+                      f"s nastavením modelů z kopie ve složce běhu ({SLOZKA_KONFIGURACE}/nastaveni.yaml).")
+            _log.warning(zprava)
+            if hlaseni is not None:
+                hlaseni(zprava)
+            return konfigurace
+        _log.info("Nastavení: oddíly modely a ceny_usd_za_milion z aktuálního %s; smyčka, váhy, "
+                  "profil a prompty z kopie běhu (%s).", soubor, SLOZKA_KONFIGURACE)
+    nastaveni = konfigurace.nastaveni.model_copy(update={
+        "modely": aktualni.modely, "ceny_usd_za_milion": aktualni.ceny_usd_za_milion})
+    return replace(konfigurace, nastaveni=nastaveni)
+
+
+def _nacti_zdroje(beh: Beh, koren: Path | None = None,
+                  hlaseni: Callable[[str], None] | None = None) -> Zdroje:
+    """Zdroje z kopií ve složce běhu (konfigurace, prompty, poptávka, podklady).
+
+    Je-li zadán `koren`, oddíly `modely` a `ceny_usd_za_milion` se vezmou z aktuálního
+    koren/nastaveni.yaml (viz _modely_z_repozitare).
+    """
     konf_slozka = beh.slozka / SLOZKA_KONFIGURACE
     kriteria = konf_slozka / "kriteria.yaml"
     konfigurace = nacti_konfiguraci(
@@ -47,6 +88,8 @@ def _nacti_zdroje(beh: Beh) -> Zdroje:
     )
     # Kopie profilu se jmenuje profil.yaml; název profilu (pro FINALNI_<profil>) je ve stavu běhu.
     konfigurace = replace(konfigurace, profil_nazev=beh.stav.profil)
+    if koren is not None:
+        konfigurace = _modely_z_repozitare(beh, konfigurace, koren, hlaseni)
     podklady = beh.slozka / _PODKLADY
     return Zdroje(
         poptavka=beh.text("poptavka"),
@@ -56,8 +99,12 @@ def _nacti_zdroje(beh: Beh) -> Zdroje:
     )
 
 
-def zahaj_beh(koren: Path, vstup: Path, profil: str, ted: datetime) -> tuple[Beh, Zdroje]:
-    """Založí běh v koren/output: kopie konfigurace a promptů, krok poptavka a data/podklady.md."""
+def zahaj_beh(koren: Path, vstup: Path, profil: str, ted: datetime,
+              nanecisto: bool = False) -> tuple[Beh, Zdroje]:
+    """Založí běh v koren/output: kopie konfigurace a promptů, krok poptavka a data/podklady.md.
+
+    `nanecisto` se uloží do stavu běhu (ukázkový běh s falešnými modely).
+    """
     nastaveni = koren / "nastaveni.yaml"
     soubor_profilu = koren / "profily" / f"{profil}.yaml"
     kriteria = cesta_kriterii_k_poptavce(vstup)
@@ -66,7 +113,7 @@ def zahaj_beh(koren: Path, vstup: Path, profil: str, ted: datetime) -> tuple[Beh
     poptavka = nacti_jako_markdown(vstup)
     podklady = nacti_podklady(koren / "podklady")
 
-    beh = Beh.novy(koren / "output", vstup.name, profil, ted)
+    beh = Beh.novy(koren / "output", vstup.name, profil, ted, nanecisto=nanecisto)
     konf_slozka = beh.slozka / SLOZKA_KONFIGURACE
     konf_slozka.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(nastaveni, konf_slozka / "nastaveni.yaml")
@@ -88,22 +135,50 @@ def _otevri(slozka: Path) -> Beh:
         raise ChybaVstupu(f"Stav běhu ve složce {slozka} nelze přečíst ({_STAV}).") from e
 
 
-def obnov_beh(slozka: Path) -> tuple[Beh, Zdroje]:
-    """Otevře přerušený běh; konfiguraci, prompty i vstupy bere z kopií ve složce běhu."""
+def obnov_beh(
+    slozka: Path,
+    koren: Path | None = None,
+    nanecisto: bool | None = None,
+    hlaseni: Callable[[str], None] | None = None,
+) -> tuple[Beh, Zdroje]:
+    """Otevře přerušený běh; konfiguraci, prompty i vstupy bere z kopií ve složce běhu.
+
+    Se zadaným `koren` bere oddíly `modely` a `ceny_usd_za_milion` z aktuálního
+    koren/nastaveni.yaml. Se zadaným `nanecisto` odmítne běh jiného režimu (ukázkový/ostrý).
+    """
     beh = _otevri(slozka)
     if beh.stav.stav == "dokoncen":
         raise ChybaVstupu(f"Běh {slozka.name} je už dokončený.")
     if not beh.hotovo("poptavka"):
         raise ChybaVstupu(f"Běh {slozka.name} nelze obnovit: chybí uložená poptávka.")
-    return beh, _nacti_zdroje(beh)
+    if nanecisto is not None and beh.stav.nanecisto != nanecisto:
+        if beh.stav.nanecisto:
+            raise ChybaVstupu(f"Běh {slozka.name} je ukázkový (--nanecisto, falešné modely); "
+                              "pokračovat v něm lze jen s volbou --nanecisto.")
+        raise ChybaVstupu(f"Běh {slozka.name} je ostrý běh se skutečnými modely; s volbou --nanecisto "
+                          "v něm pokračovat nelze. Spusťte pokracovat.bat bez --nanecisto.")
+    return beh, _nacti_zdroje(beh, koren, hlaseni)
 
 
-def otevri_dokonceny(slozka: Path) -> tuple[Beh, Zdroje]:
-    """Otevře dokončený běh k porovnání; zdroje bere z kopií ve složce běhu."""
+def otevri_dokonceny(
+    slozka: Path,
+    koren: Path | None = None,
+    nanecisto: bool | None = None,
+    hlaseni: Callable[[str], None] | None = None,
+) -> tuple[Beh, Zdroje]:
+    """Otevře dokončený běh k porovnání; zdroje bere z kopií ve složce běhu.
+
+    `koren` a `nanecisto` jako u obnov_beh (porovnání volá skutečný GPT, ukázkový běh odmítne).
+    """
     beh = _otevri(slozka)
     if beh.stav.stav != "dokoncen":
         raise ChybaVstupu(f"Běh {slozka.name} není dokončený; porovnat lze jen dokončený běh.")
-    return beh, _nacti_zdroje(beh)
+    if nanecisto is not None and beh.stav.nanecisto != nanecisto:
+        if beh.stav.nanecisto:
+            raise ChybaVstupu(f"Běh {slozka.name} je ukázkový (--nanecisto) s falešnými texty; "
+                              "s referencí ho porovnat nelze.")
+        raise ChybaVstupu(f"Běh {slozka.name} je ostrý běh; v ukázkovém režimu ho porovnat nelze.")
+    return beh, _nacti_zdroje(beh, koren, hlaseni)
 
 
 def obnov_prompty_porovnani(beh: Beh, prompty: Path) -> None:
@@ -121,8 +196,11 @@ def obnov_prompty_porovnani(beh: Beh, prompty: Path) -> None:
             shutil.copyfile(zdroj, cil / f"{nazev}.md")
 
 
-def najdi_posledni_beh(output: Path, stavy: set[str]) -> Path | None:
-    """Nejnovější (podle `vytvoreno`) složka běhu v `output` s jedním z daných stavů."""
+def najdi_posledni_beh(output: Path, stavy: set[str], nanecisto: bool | None = None) -> Path | None:
+    """Nejnovější (podle `vytvoreno`) složka běhu v `output` s jedním z daných stavů.
+
+    Se zadaným `nanecisto` přeskočí běhy jiného režimu (ukázkové/ostré).
+    """
     if not output.is_dir():
         return None
     nalezene: list[tuple[datetime, str, Path]] = []
@@ -133,7 +211,7 @@ def najdi_posledni_beh(output: Path, stavy: set[str]) -> Path | None:
             stav = Beh.otevri(slozka).stav
         except (OSError, ValidationError):
             continue
-        if stav.stav in stavy:
+        if stav.stav in stavy and (nanecisto is None or stav.nanecisto == nanecisto):
             nalezene.append((stav.vytvoreno, slozka.name, slozka))
     return max(nalezene)[2] if nalezene else None
 

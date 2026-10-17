@@ -1,4 +1,4 @@
-from refiner.data import Nalezitost, sestav_kriteria
+from refiner.data import Nalezitost, VysledekSkore, sestav_kriteria
 from refiner.konfigurace import KriteriumProfilu
 from refiner.skore import format_skore, skore_c, spocitej, vyber_finalni
 from tests.pomocne import hodnoceni, kriteria_test, nastaveni_test
@@ -43,9 +43,25 @@ def test_cil_pod_prahem():
     assert any("9,3 < 9,5" in d for d in v.duvody_nesplneni)
 
 
+def _vys(celkem: float, cil: bool = False) -> VysledekSkore:
+    return VysledekSkore(a=celkem, b=celkem, c=10, celkem=celkem, cil_splnen=cil,
+                         duvody_nesplneni=[] if cil else ["x"])
+
+
 def test_vyber_finalni_nejvyssi_pri_shode_pozdejsi():
-    assert vyber_finalni({1: 7.0, 2: 8.8, 3: 8.1, 4: 8.8}) == 4
-    assert vyber_finalni({1: 7.0, 2: 8.8, 3: 8.1}) == 2
+    """Žádná verze nesplnila cíl: rozhoduje nejvyšší skóre, při shodě pozdější verze."""
+    assert vyber_finalni({1: _vys(7.0), 2: _vys(8.8), 3: _vys(8.1), 4: _vys(8.8)}) == 4
+    assert vyber_finalni({1: _vys(7.0), 2: _vys(8.8), 3: _vys(8.1)}) == 2
+
+
+def test_vyber_finalni_splneny_cil_ma_prednost_pred_vyssim_skore():
+    """v2 má 9,6, ale cíl blokuje náležitost nebo vymyšlený fakt; v3 s 9,5 cíl splnila."""
+    assert vyber_finalni({1: _vys(8.0), 2: _vys(9.6), 3: _vys(9.5, cil=True)}) == 3
+
+
+def test_vyber_finalni_shoda_se_splnenym_cilem_pozdejsi():
+    assert vyber_finalni({1: _vys(9.6, cil=True), 2: _vys(9.6, cil=True)}) == 2
+    assert vyber_finalni({1: _vys(9.7, cil=True), 2: _vys(9.6, cil=True), 3: _vys(9.9)}) == 1
 
 
 def test_format_skore():

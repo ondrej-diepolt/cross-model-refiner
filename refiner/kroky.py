@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+import unicodedata
 from string import Template
 from typing import TypeVar
 
@@ -27,7 +28,8 @@ PRAZDNE_PODKLADY = "(Profil firmy nebyl dodán – všechna fakta o dodavateli o
 ZADNE_ODMITNUTE = "(žádné)"
 MIN_POMER_DELKY = 0.7
 PORADI_PRIORIT = {"vysoka": 0, "stredni": 1, "nizka": 2}
-SLOVA_ZKRACENI = ("zkrát", "odstran")
+# Kmeny bez diakritiky; porovnávají se s textem návrhu zbaveným diakritiky (odstraň → odstran).
+SLOVA_ZKRACENI = ("zkrat", "odstran", "vypust", "smaz", "zrus")
 
 ZADANI_NALEZITOSTI = "Vypiš povinné náležitosti z poptávky výše podle pokynů."
 ZADANI_NAVRH = "Napiš dokument podle pokynů výše."
@@ -257,6 +259,11 @@ def prijate(posouzeni: Posouzeni) -> list[Rozhodnuti]:
     return [r for r in posouzeni.rozhodnuti if r.rozhodnuti in ("prijato", "castecne")]
 
 
+def _bez_diakritiky(text: str) -> str:
+    rozlozeny = unicodedata.normalize("NFKD", text)
+    return "".join(z for z in rozlozeny if not unicodedata.combining(z)).lower()
+
+
 def zkontroluj_prepis(stary: str, novy: str, hodnoceni: Hodnoceni, posouzeni: Posouzeni) -> list[str]:
     if not novy.strip():
         return ["Nový dokument je prázdný."]
@@ -270,7 +277,7 @@ def zkontroluj_prepis(stary: str, novy: str, hodnoceni: Hodnoceni, posouzeni: Po
         texty = []
         for r in prijate(posouzeni):
             n = podle_id.get(r.id_navrhu)
-            texty.append(((n.navrh if n else "") + " " + r.jak_zapracovat).lower())
+            texty.append(_bez_diakritiky((n.navrh if n else "") + " " + r.jak_zapracovat))
         if not any(slovo in t for t in texty for slovo in SLOVA_ZKRACENI):
             chyby.append(
                 f"Dokument se zkrátil na {round(100 * len(novy) / len(stary))} % původní délky, "

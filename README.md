@@ -12,6 +12,9 @@ Výsledkem je hotový dokument (DOCX a Markdown) a přehled celého běhu v proh
 - Data z API se podle podmínek obou poskytovatelů standardně nepoužívají k trénování. Nastavení
   organizace (doba uchovávání dat) je ale potřeba ověřit v konzolích obou účtů.
 - Poptávka obvykle není důvěrná. Profil firmy obsahuje osobní údaje členů týmu.
+- Příkaz **`porovnat`** (`porovnat.bat`) posílá službě **OpenAI navíc celou referenční nabídku**
+  z `examples/` – včetně jmen členů týmu, cen a referencí – spolu s generovanou nabídkou
+  a poptávkou.
 - **Nástroj se nesmí používat na neveřejné podklady klienta** (jeho předpisy, smlouvy, interní
   dokumenty) bez jeho písemného souhlasu. Naše nabídky klientům slibují, že s jejich podklady budou
   pracovat jen nástroje, které klient písemně schválí, a jen v anonymizované podobě.
@@ -44,7 +47,7 @@ Výsledky jsou ve složce `output/<datum_čas_název-poptávky>/`:
 | Soubor | Obsah |
 |---|---|
 | `prehled.html` | přehled běhu – začněte tady |
-| `FINALNI_nabidka.docx`, `FINALNI_nabidka.md` | finální dokument (verze s nejvyšším skóre); u profilu směrnice `FINALNI_smernice.*` – obecně `FINALNI_<profil>.*` |
+| `FINALNI_nabidka.docx`, `FINALNI_nabidka.md` | finální dokument (verze, která splnila cíl; když žádná, verze s nejvyšším skóre); u profilu směrnice `FINALNI_smernice.*` – obecně `FINALNI_<profil>.*` |
 | `01_poptavka.md` | poptávka převedená do textu – co modely skutečně viděly |
 | `02_nalezitosti.md` | povinné náležitosti vytažené z poptávky |
 | `03_navrh_v1.md`, `06_navrh_v2.md`… | jednotlivé verze dokumentu |
@@ -100,9 +103,24 @@ co se stalo, uloží rozpracovaný běh a vytvoří přehled s tím, co už je h
 dvakrát klikněte na **`pokracovat.bat`** – naváže na posledním přerušeném běhu a hotové kroky už
 neplatí znovu. Konkrétní běh lze dokončit přetažením jeho složky z `output/` na `pokracovat.bat`.
 
-Pozor: pokračující běh používá **kopii konfigurace a promptů uloženou ve složce běhu**
-(`data/konfigurace/`). Úprava `prompty/`, `profily/` nebo `nastaveni.yaml` v repozitáři se na
-pokračování už rozběhnutého běhu neprojeví – platí jen pro nové běhy.
+Co pokračující běh použije:
+
+- **Nastavení modelů** (oddíl `modely:` – limity tokenů, časový limit, effort, názvy modelů)
+  a ceny tokenů bere z **aktuálního `nastaveni.yaml` v repozitáři**. Když běh skončí hláškou
+  o uříznuté odpovědi nebo o vypršení času, upravte příslušnou hodnotu v `nastaveni.yaml`
+  (např. `max_tokens_json` nebo `max_output_tokens`, `timeout_s`) a spusťte `pokracovat.bat`.
+  Která nastavení se použila, je zapsáno v `data/beh.log`. Je-li `nastaveni.yaml` v repozitáři
+  chybný nebo chybí, běh pokračuje s kopií ve složce běhu a vypíše varování.
+- Vše ostatní – cílové skóre a další řízení smyčky, váhy skupin, profil, kritéria a prompty – bere
+  z **kopie uložené ve složce běhu** (`data/konfigurace/`), aby skóre zůstalo srovnatelné. Úprava
+  `prompty/`, `profily/` nebo těchto částí `nastaveni.yaml` se projeví až v novém běhu.
+
+Ukázkový běh (`--nanecisto`) se dokončuje také s `--nanecisto` (`pokracovat.bat --nanecisto`);
+ostrý běh bez něj. `pokracovat.bat` bez parametru vybírá jen běhy odpovídajícího druhu.
+
+Po Ctrl+C se Windows zeptá „Terminate batch job (Y/N)?“ (česky „Ukončit dávkovou úlohu (A/N)?“).
+Odpověď **N** nechá okno otevřené s hláškou, jak pokračovat; odpověď **Y** okno hned zavře
+(přeskočí závěrečné „Pokračujte stisknutím libovolné klávesy“). Běh je uložený v obou případech.
 
 ## Porovnání s referencí
 
@@ -128,8 +146,9 @@ a k ověření, že je výsledek reálně použitelný.
 
 Porovnání stojí 5 volání GPT (spotřeba se připíše do `data/beh.json` běhu, stav běhu se nemění)
 a dá se opakovat: výsledky se přepíšou, vyplněný formulář zůstane. Prompty porovnání
-(`prompty/porovnani_*.md`) se berou vždy aktuální z repozitáře; kalibrace hodnotí promptem
-uloženým v běhu, stejně jako generovanou nabídku. Pro férové srovnání vyplňte
+(`prompty/porovnani_*.md`) a nastavení modelů (oddíl `modely:` v `nastaveni.yaml`) se berou vždy
+aktuální z repozitáře; kalibrace hodnotí promptem uloženým v běhu, stejně jako generovanou
+nabídku. Ukázkové běhy (`--nanecisto`) porovnat nelze – mají jen falešné texty. Pro férové srovnání vyplňte
 `podklady/profil_firmy.md` stejnými fakty, jaké má reference (sazba, tým, reference) – jinak bude
 generovaná nabídka v kapitolách cena, tým a reference z definice horší.
 
@@ -141,7 +160,8 @@ spustit.bat --nanecisto
 
 (v příkazovém řádku ve složce nástroje). Projde celý běh s falešnými modely – bez volání API, bez
 klíčů a zdarma. Výstup má stejnou strukturu jako ostrý běh, texty jsou jen ukázkové. Hodí se pro
-ověření instalace a seznámení s výstupy.
+ověření instalace a seznámení s výstupy. Běh je ve svém stavu označen jako ukázkový; pokračovat
+v něm lze jen s `--nanecisto` a s referencí ho porovnat nelze.
 
 ## Kolik to stojí
 
@@ -153,7 +173,7 @@ v `prehled.html`.
 
 ```
 .venv\Scripts\python.exe -m refiner [--nanecisto]
-.venv\Scripts\python.exe -m refiner --pokracovat [SLOZKA_BEHU]
+.venv\Scripts\python.exe -m refiner [--nanecisto] --pokracovat [SLOZKA_BEHU]
 .venv\Scripts\python.exe -m refiner porovnat [SLOZKA_BEHU] [--reference SOUBOR]
 .venv\Scripts\python.exe -m pytest
 ```

@@ -72,6 +72,21 @@ def test_pokles_skore_vybere_drivejsi_verzi(tmp_path, zdroje):
     assert v.finalni_verze == 2
 
 
+def test_splneny_cil_ma_prednost_pred_vyssim_zablokovanym_skore(tmp_path, zdroje):
+    """v2 má vyšší skóre, ale cíl blokuje náležitost pod minimem; v3 cíl splní → finální v3."""
+    beh = beh_test(tmp_path, zdroje)
+    pis, hod = odpovedi_skriptu([7.0, 10.0, 9.5])
+    h2 = hodnoceni(10.0, {"N1": 7.5})
+    hod["hodnoceni_2"] = [h2]
+    pis["posouzeni_2"] = [posouzeni(h2)]
+    hod["hodnoceni_3"] = [hodnoceni(9.5, {"B1": 9.0})]
+    v = spust_smycku(beh, zdroje, FalesnyModel(pis, nazev="claude-falesny"),
+                     FalesnyModel(hod, nazev="gpt-falesny"), hlaseni=_ticho)
+    assert not v.skore[2].cil_splnen and v.skore[3].cil_splnen
+    assert v.skore[2].celkem > v.skore[3].celkem
+    assert v.duvod == "cil_splnen" and v.finalni_verze == 3
+
+
 def _odpovedi_se_smisenym_posouzenim(skore: list[float]):
     """Kolo 1: návrh V1 přijat částečně, V2 odmítnut (s rozpoznatelným textem)."""
     pis, hod = odpovedi_skriptu(skore)

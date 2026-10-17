@@ -27,6 +27,8 @@ class StavBehu(BaseModel):
     vstup: str
     profil: str
     vytvoreno: datetime
+    # Ukázkový běh (--nanecisto, falešné modely). Starší běhy pole nemají → ostrý běh.
+    nanecisto: bool = False
     ukonceno: datetime | None = None
     stav: Literal["bezi", "dokoncen", "prerusen"] = "bezi"
     duvod_ukonceni: str | None = None
@@ -44,7 +46,8 @@ class Beh:
         self.stav = stav
 
     @classmethod
-    def novy(cls, output: Path, nazev_vstupu: str, profil: str, ted: datetime) -> Beh:
+    def novy(cls, output: Path, nazev_vstupu: str, profil: str, ted: datetime,
+             nanecisto: bool = False) -> Beh:
         zaklad = f"{ted:%Y-%m-%d_%H%M}_{slug(Path(nazev_vstupu).stem)}"
         slozka = output / zaklad
         n = 2
@@ -52,7 +55,8 @@ class Beh:
             slozka = output / f"{zaklad}_{n}"
             n += 1
         (slozka / "data").mkdir(parents=True)
-        beh = cls(slozka, StavBehu(vstup=nazev_vstupu, profil=profil, vytvoreno=ted))
+        beh = cls(slozka, StavBehu(vstup=nazev_vstupu, profil=profil, vytvoreno=ted,
+                                   nanecisto=nanecisto))
         beh.uloz()
         return beh
 

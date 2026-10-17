@@ -1,14 +1,22 @@
 # Nastavení nástroje (modely, smyčka, váhy skupin kritérií, ceny).
 modely:
-  # Claude píše a zapracovává text; effort řídí hloubku uvažování.
+  # Claude píše a zapracovává text; effort řídí hloubku uvažování
+  # (low, medium, high, xhigh, max). Do max_tokens_* se počítá i uvažování modelu,
+  # proto jsou limity vysoké; při hlášce o uříznuté odpovědi je zvyšte.
   claude: {model: claude-opus-5-5, effort: high, effort_extrakce: medium,
-           max_tokens_text: 64000, max_tokens_json: 16000, fallback: true}
-  # GPT je nezávislý hodnotitel.
-  gpt: {model: gpt-6-astra, effort: high, max_output_tokens: 32000}
+           max_tokens_text: 64000, max_tokens_json: 32000, fallback: true}
+  # GPT je nezávislý hodnotitel. Do max_output_tokens se počítají i tokeny uvažování
+  # (reasoning), proto je limit vysoký; při hlášce o uříznuté odpovědi ho zvyšte.
+  gpt: {model: gpt-6-astra, effort: high, max_output_tokens: 64000}
   max_retries: 4      # počet opakování při dočasné chybě API
-  timeout_s: 600      # časový limit jednoho volání v sekundách
-# Řízení smyčky: cílové skóre (0-10), max. počet revizí, minimální náležitost
-# návrhu k zapracování a maximální počet zapracovaných návrhů v jednom kole.
+  # Časový limit jednoho volání v sekundách. Hodnocení s vysokým effortem trvá i desítky
+  # minut, proto je limit dlouhý.
+  timeout_s: 1800
+# Řízení smyčky:
+#   cilove_skore   – cílové celkové skóre (0–10),
+#   max_revizi     – nejvyšší počet revizí (zapracování),
+#   min_nalezitost – minimální skóre každé povinné náležitosti, aby byl cíl splněn,
+#   max_navrhu     – nejvyšší počet návrhů, které smí hodnotitel v jednom hodnocení podat.
 smycka: {cilove_skore: 9.5, max_revizi: 3, min_nalezitost: 8, max_navrhu: 10}
 # Váhy skupin: A povinné náležitosti, B obecná kvalita, C fakta. Součet musí být 1.
 vahy_skupin: {A: 0.50, B: 0.35, C: 0.15}

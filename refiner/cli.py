@@ -51,8 +51,12 @@ HLASKA_VZOR_ENV = "Vzor najdete v souboru .env.example."
 HLASKA_ENV_KODOVANI = "Soubor .env nelze přečíst – uložte ho v kódování UTF-8."
 HLASKA_ZADNY_VSTUP = "Ve složce input/ není žádná poptávka (DOCX, MD nebo TXT)."
 HLASKA_ZADNY_PROFIL = "Ve složce profily/ není žádný profil dokumentu (*.yaml)."
-HLASKA_ZADNY_PRERUSENY = "Ve složce output/ není žádný přerušený běh, ve kterém by šlo pokračovat."
-HLASKA_ZADNY_DOKONCENY = "Ve složce output/ není žádný dokončený běh, který by šlo porovnat s referencí."
+HLASKA_ZADNY_PRERUSENY = ("Ve složce output/ není žádný přerušený ostrý běh, ve kterém by šlo pokračovat "
+                          "(ukázkové běhy se dokončují s volbou --nanecisto).")
+HLASKA_ZADNY_PRERUSENY_NANECISTO = ("Ve složce output/ není žádný přerušený ukázkový běh (--nanecisto), "
+                                    "ve kterém by šlo pokračovat (ostré běhy se dokončují bez --nanecisto).")
+HLASKA_ZADNY_DOKONCENY = ("Ve složce output/ není žádný dokončený ostrý běh, který by šlo porovnat "
+                          "s referencí (ukázkové běhy --nanecisto se neporovnávají).")
 HLASKA_POROVNAT_VOLBY = ("Příkaz porovnat nejde kombinovat s --nanecisto ani --pokracovat "
                          "(porovnání volá skutečný model GPT).")
 HLASKA_KONEC_VSTUPU = "Volba nebyla zadána (konec vstupu)."
@@ -174,9 +178,10 @@ def _zvol_vstup(koren: Path, konzole: _Konzole, vstup_fn: Callable[[str], str]) 
     return vstupy[_vyber(konzole, vstup_fn, "Kterou poptávku zpracovat?", [p.name for p in vstupy])]
 
 
-def _slozka_behu(koren: Path, hodnota: str, stavy: set[str]) -> Path | None:
+def _slozka_behu(koren: Path, hodnota: str, stavy: set[str], nanecisto: bool) -> Path | None:
+    """Zadaná složka běhu, nebo poslední běh v output/ ve stejném režimu (ukázkový/ostrý)."""
     if not hodnota:
-        return najdi_posledni_beh(koren / "output", stavy)
+        return najdi_posledni_beh(koren / "output", stavy, nanecisto=nanecisto)
     cesta = Path(hodnota)
     if not cesta.is_absolute() and not cesta.exists() and (koren / "output" / cesta).exists():
         cesta = koren / "output" / cesta
@@ -272,22 +277,24 @@ def _spust(
 
     try:
         if porovnat:
-            slozka = _slozka_behu(koren, args.slozka, {"dokoncen"})
+            # Porovnání volá vždy skutečný GPT: ukázkové běhy se přeskočí, resp. odmítnou.
+            slozka = _slozka_behu(koren, args.slozka, {"dokoncen"}, nanecisto=False)
             if slozka is None:
                 konzole(HLASKA_ZADNY_DOKONCENY)
                 return 2
-            beh, zdroje = otevri_dokonceny(slozka)
+            beh, zdroje = otevri_dokonceny(slozka, koren=koren, nanecisto=False, hlaseni=konzole)
             obnov_prompty_porovnani(beh, koren / "prompty")
             reference = _cesta_reference(koren, args.reference)
             reference_md = nacti_referenci(reference)
             hodnotitel = hodnotitel_fn(zdroje.konfigurace)
             konzole(f"Porovnávám běh {beh.slozka} s referencí {reference.name}")
         elif args.pokracovat is not None:
-            slozka = _slozka_behu(koren, args.pokracovat, PRERUSENE_STAVY)
+            slozka = _slozka_behu(koren, args.pokracovat, PRERUSENE_STAVY, nanecisto=args.nanecisto)
             if slozka is None:
-                konzole(HLASKA_ZADNY_PRERUSENY)
+                konzole(HLASKA_ZADNY_PRERUSENY_NANECISTO if args.nanecisto else HLASKA_ZADNY_PRERUSENY)
                 return 2
-            beh, zdroje = obnov_beh(slozka)
+            # Oddíl modely (limity, časový limit) a ceny z aktuálního nastaveni.yaml, zbytek z kopie běhu.
+            beh, zdroje = obnov_beh(slozka, koren=koren, nanecisto=args.nanecisto, hlaseni=konzole)
             konzole(f"Pokračuji v běhu: {beh.slozka}")
             pisatel, hodnotitel = tovarna(zdroje.konfigurace, args.nanecisto)
         else:
@@ -300,7 +307,7 @@ def _spust(
             )
             pisatel, hodnotitel = tovarna(konfigurace, args.nanecisto)
             konzole(f"Poptávka: {vstup.name}, profil: {konfigurace.profil.nazev}")
-            beh, zdroje = zahaj_beh(koren, vstup, profil, datetime.now())
+            beh, zdroje = zahaj_beh(koren, vstup, profil, datetime.now(), nanecisto=args.nanecisto)
             konzole(f"Složka běhu: {beh.slozka}")
     except (ChybaKonfigurace, ChybaVstupu) as e:
         konzole(str(e))

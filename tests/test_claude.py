@@ -19,39 +19,46 @@ def nastaveni(fallback: bool = True) -> NastaveniModelu:
         max_retries=2, timeout_s=30.0)
 
 
-def zprava(stop_reason="end_turn", parsed=None, bloky=("{}",), category=None, usage=(100, 50, 30)):
+def zprava(stop_reason="end_turn", parsed=None, bloky=("{}",), category=None,
+           usage=(100, 50, 30, 20)):
     return SimpleNamespace(
         stop_reason=stop_reason, parsed_output=parsed,
         stop_details=SimpleNamespace(category=category) if category else None,
         content=[SimpleNamespace(type="text", text=t) for t in bloky],
         usage=SimpleNamespace(input_tokens=usage[0], output_tokens=usage[1],
-                              cache_read_input_tokens=usage[2]))
+                              cache_read_input_tokens=usage[2],
+                              cache_creation_input_tokens=usage[3] if len(usage) > 3 else None))
 
 
 class FalesnyKlient:
-    def __init__(self, odpoved=None, vyjimka=None):
+    """Napodobí beta.messages.stream; json() i text() streamují (parse se nesmí volat)."""
+
+    def __init__(self, odpoved=None, vyjimka=None, vyjimka_pri_cteni=None):
         self.posledni_kwargs = None
+        self.volani_stream = 0
         self._odpoved = odpoved
         self._vyjimka = vyjimka
-        messages = SimpleNamespace(parse=self._parse, stream=self._stream)
-        self.beta = SimpleNamespace(messages=messages)
-
-    def _parse(self, **kw):
-        self.posledni_kwargs = kw
-        if self._vyjimka:
-            raise self._vyjimka
-        return self._odpoved
+        self._vyjimka_pri_cteni = vyjimka_pri_cteni
+        self.beta = SimpleNamespace(messages=SimpleNamespace(stream=self._stream))
 
     def _stream(self, **kw):
         self.posledni_kwargs = kw
+        self.volani_stream += 1
         odpoved = self._odpoved
         vyjimka = self._vyjimka
+        pri_cteni = self._vyjimka_pri_cteni
+
+        def get_final_message():
+            # SDK parsuje strukturovaný výstup při content_block_stop, tedy během čtení proudu.
+            if pri_cteni:
+                raise pri_cteni
+            return odpoved
 
         class Kontext:
             def __enter__(self_):
                 if vyjimka:
                     raise vyjimka
-                return SimpleNamespace(get_final_message=lambda: odpoved)
+                return SimpleNamespace(get_final_message=get_final_message)
 
             def __exit__(self_, *a):
                 return False
@@ -75,6 +82,15 @@ def test_json_posle_cache_effort_a_fallback():
     assert kw["betas"] == ["server-side-fallback-2026-07-01"]
     assert "thinking" not in kw
     assert m.nazev == "claude-opus-5-5"
+
+
+def test_json_streamuje():
+    """Thinking tokeny se počítají do max_tokens; dlouhé volání bez streamu by SDK odmítlo."""
+    klient = FalesnyKlient(zprava(parsed=VystupNalezitosti(nalezitosti=[])))
+    out = ClaudeModel(nastaveni(), klient).json("I", "Z", VystupNalezitosti, krok="k")
+    assert out == VystupNalezitosti(nalezitosti=[])
+    assert klient.volani_stream == 1
+    assert not hasattr(klient.beta.messages, "parse")
 
 
 def test_json_vychozi_effort_z_nastaveni():
@@ -161,15 +177,16 @@ def test_spotreba():
     m = ClaudeModel(nastaveni(), klient)
     m.json("I", "Z", VystupNalezitosti, krok="nalezitosti")
     assert m.vyzvedni_spotrebu() == [Spotreba(krok="nalezitosti", model="claude-opus-5-5",
-                                              vstup=100, vystup=50, cache_cteni=30)]
+                                              vstup=100, vystup=50, cache_cteni=30, cache_zapis=20)]
     assert m.vyzvedni_spotrebu() == []
 
 
 def test_spotreba_bez_cache():
-    klient = FalesnyKlient(zprava(bloky=("a",), usage=(10, 5, None)))
+    klient = FalesnyKlient(zprava(bloky=("a",), usage=(10, 5, None, None)))
     m = ClaudeModel(nastaveni(), klient)
     m.text("I", "Z", krok="t")
-    assert m.vyzvedni_spotrebu()[0].cache_cteni == 0
+    s = m.vyzvedni_spotrebu()[0]
+    assert s.cache_cteni == 0 and s.cache_zapis == 0
 
 
 def test_chybejici_klic_je_chyba_klic():
@@ -189,7 +206,7 @@ def test_uriznuty_json_z_parse_je_uriznuto_se_surovym_textem():
         VystupNalezitosti.model_validate_json('{"nalezitosti": [')
     except Exception as exc:
         vyjimka = exc
-    m = ClaudeModel(nastaveni(), FalesnyKlient(vyjimka=vyjimka))
+    m = ClaudeModel(nastaveni(), FalesnyKlient(vyjimka_pri_cteni=vyjimka))
     with pytest.raises(ChybaModelu) as e:
         m.json("I", "Z", VystupNalezitosti, krok="k")
     assert e.value.druh == "uriznuto" and e.value.surova_odpoved == '{"nalezitosti": ['

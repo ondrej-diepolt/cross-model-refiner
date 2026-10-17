@@ -66,6 +66,11 @@ def spocitej(hodnoceni: Hodnoceni, kriteria: list[Kriterium], nastaveni: Nastave
     )
 
 
-def vyber_finalni(celkova_skore: dict[int, float]) -> int:
-    """Verze s nejvyšším skóre; při shodě pozdější."""
-    return max(celkova_skore, key=lambda verze: (celkova_skore[verze], verze))
+def vyber_finalni(skore: dict[int, VysledekSkore]) -> int:
+    """Finální verze (klíč = číslo verze): přednost má verze, která splnila cíl, pak nejvyšší
+    celkové skóre, při shodě pozdější verze.
+
+    Verze s vyšším skóre zablokovaná pojistkou (náležitost pod minimem, vymyšlený fakt) tak
+    neporazí verzi, která cíl splnila.
+    """
+    return max(skore, key=lambda verze: (skore[verze].cil_splnen, skore[verze].celkem, verze))

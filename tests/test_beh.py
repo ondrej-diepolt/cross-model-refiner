@@ -32,6 +32,20 @@ def test_cislovani_v_poradi_vzniku(tmp_path):
     assert b.text("navrh_1") == "z"
 
 
+def test_rezim_nanecisto_se_ulozi(tmp_path):
+    assert Beh.otevri(Beh.novy(tmp_path, "a.md", "nabidka", T, nanecisto=True).slozka).stav.nanecisto
+    assert not Beh.otevri(Beh.novy(tmp_path, "b.md", "nabidka", T).slozka).stav.nanecisto
+
+
+def test_starsi_beh_bez_rezimu_se_nacte_jako_ostry(tmp_path):
+    b = Beh.novy(tmp_path, "x.md", "nabidka", T)
+    soubor = b.slozka / "data" / "beh.json"
+    stav = json.loads(soubor.read_text(encoding="utf-8"))
+    del stav["nanecisto"]
+    soubor.write_text(json.dumps(stav), encoding="utf-8")
+    assert Beh.otevri(b.slozka).stav.nanecisto is False
+
+
 def test_otevri_obnovi_stav_a_data(tmp_path):
     b = Beh.novy(tmp_path, "x.md", "nabidka", T)
     h = Hodnoceni(kriteria=[], vymyslena_fakta=[], tvrzeni_k_overeni=[], navrhy=[], celkovy_komentar="ok")

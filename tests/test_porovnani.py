@@ -1,5 +1,6 @@
 """Porovnání s referencí (design kap. 11)."""
 import io
+import os
 import shutil
 from pathlib import Path
 
@@ -324,12 +325,56 @@ def koren(tmp_path, koren_repa) -> Path:
     return kor
 
 
-def _dokonceny_beh_cli(koren: Path) -> tuple[Path, FalesnyModel]:
-    """Dokončený běh přes --nanecisto; examples/ s referencí už existuje."""
+def _dokonceny_beh_cli(koren: Path, nanecisto: bool = False) -> tuple[Path, FalesnyModel]:
+    """Dokončený běh s falešnými modely; examples/ s referencí už existuje.
+
+    Výchozí je ostrý běh (porovnat ukázkový běh odmítá): klíče se nastaví jen na dobu běhu,
+    aby testy porovnání mohly ověřit, které klíče porovnání vyžaduje.
+    """
     modely = demo_modely()
-    assert main(["--nanecisto"], koren=koren, vstup_fn=lambda _: "1", vystup=io.StringIO(),
-                tovarna_modelu=lambda konf, nanecisto: modely) == 0
-    return next((koren / "output").iterdir()), modely[0]
+    argv = ["--nanecisto"] if nanecisto else []
+    pred = set((koren / "output").iterdir()) if (koren / "output").exists() else set()
+    if not nanecisto:
+        os.environ["ANTHROPIC_API_KEY"] = os.environ["OPENAI_API_KEY"] = "test-klic"
+    try:
+        assert main(argv, koren=koren, vstup_fn=lambda _: "1", vystup=io.StringIO(),
+                    tovarna_modelu=lambda konf, n: modely) == 0
+    finally:
+        if not nanecisto:
+            os.environ.pop("ANTHROPIC_API_KEY", None)
+            os.environ.pop("OPENAI_API_KEY", None)
+    (slozka,) = set((koren / "output").iterdir()) - pred
+    return slozka, modely[0]
+
+
+def test_cli_porovnat_ukazkovy_beh_odmitne(koren, monkeypatch):
+    slozka, _ = _dokonceny_beh_cli(koren, nanecisto=True)
+    assert Beh.otevri(slozka).stav.nanecisto
+    monkeypatch.setenv("OPENAI_API_KEY", "test-klic")
+    hod = _hodnotitel()
+    out = io.StringIO()
+    assert main(["porovnat", slozka.name], koren=koren, vystup=out,
+                tovarna_modelu=lambda konf, n: (FalesnyModel({}), hod)) == 2
+    assert "ukázkový" in out.getvalue() and hod.volani == []
+    assert not (slozka / "porovnani.html").exists()
+
+
+def test_cli_porovnat_bez_slozky_preskoci_ukazkove_behy(koren, monkeypatch):
+    ostry, _ = _dokonceny_beh_cli(koren)
+    ukazkovy, _ = _dokonceny_beh_cli(koren, nanecisto=True)   # novější
+    monkeypatch.setenv("OPENAI_API_KEY", "test-klic")
+    assert main(["porovnat"], koren=koren, vystup=io.StringIO(),
+                tovarna_modelu=lambda konf, n: (FalesnyModel({}), _hodnotitel())) == 0
+    assert (ostry / "porovnani.html").exists() and not (ukazkovy / "porovnani.html").exists()
+
+
+def test_cli_porovnat_jen_ukazkove_behy_je_kod_2(koren, monkeypatch):
+    _dokonceny_beh_cli(koren, nanecisto=True)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-klic")
+    out = io.StringIO()
+    assert main(["porovnat"], koren=koren, vystup=out,
+                tovarna_modelu=lambda konf, n: (FalesnyModel({}), _hodnotitel())) == 2
+    assert "ukázkové" in out.getvalue()
 
 
 def test_cli_porovnat_bez_slozky(koren, monkeypatch):

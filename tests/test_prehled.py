@@ -103,6 +103,38 @@ def test_prehled_cena_a_tokeny(tmp_path, zdroje):
     assert "8,00" in html and "orientačně" in html and "cena neznámá" in html
 
 
+def test_cena_cache_podle_poskytovatele(zdroje):
+    """Anthropic: vstup bez cache, zápis ×1,25, čtení ×0,1. OpenAI: cache je podmnožina vstupu, ×0,5."""
+    from refiner.vystup.prehled import _cena
+
+    cena = _cena([
+        # 4 + 2 000 000×0,1×4 + 400 000×1,25×4 + 100 000×20 (za milion) = 4 + 0,8 + 2 + 2 = 8,80
+        Spotreba(krok="a", model="claude-opus-5-5", vstup=1_000_000, vystup=100_000,
+                 cache_cteni=2_000_000, cache_zapis=400_000),
+        # (1 000 000 − 600 000)×10 + 600 000×0,5×10 + 10 000×50 (za milion) = 4 + 3 + 0,5 = 7,50
+        Spotreba(krok="b", model="gpt-6-astra", vstup=1_000_000, vystup=10_000, cache_cteni=600_000),
+    ], zdroje.konfigurace)
+    assert [r["cena"] for r in cena["radky"]] == ["8,80 USD", "7,50 USD"]
+    assert cena["celkem"] == "16,30"
+
+
+def test_prehled_cena_uvadi_odhad_cache(tmp_path, zdroje):
+    beh = beh_test(tmp_path, zdroje)
+    beh.pridej_spotrebu([Spotreba(krok="a", model="claude-opus-5-5", vstup=10, vystup=5)])
+    html = _html(beh, zdroje)
+    assert "Cena (orientačně, cache odhadem)" in html and "bez slev za cache" not in html
+
+
+def test_prehled_finalni_splnila_cil_vysvetli(tmp_path, zdroje):
+    beh = beh_test(tmp_path, zdroje)
+    beh.uloz_skore(1, VysledekSkore(a=9.5, b=9.5, c=10, celkem=9.5, cil_splnen=True, duvody_nesplneni=[]))
+    beh.uloz_skore(2, VysledekSkore(a=9.8, b=9.8, c=7, celkem=9.6, cil_splnen=False,
+                                    duvody_nesplneni=["text obsahuje vymyšlené fakty (1)"]))
+    beh.ukonci("dokoncen", "cil_splnen", finalni_verze=1)
+    html = _html(beh, zdroje)
+    assert "verze 1 splnila cíl" in html and "vyšší skóre" not in html
+
+
 def test_prehled_finalni_neni_posledni_vysvetli(tmp_path, zdroje):
     beh = beh_test(tmp_path, zdroje)
     for k, c in enumerate([6.0, 8.0, 7.0, 7.5], start=1):

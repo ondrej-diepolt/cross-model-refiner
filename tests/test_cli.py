@@ -271,3 +271,86 @@ def test_pokracovat_dokonceny_beh_je_kod_2(koren):
     assert main(["--nanecisto", "--pokracovat", str(slozka)], koren=koren, vstup_fn=_nepouzivat,
                 vystup=out) == 2
     assert "dokončený" in out.getvalue()
+
+
+# ---------------------------------------------------------------- ukázkový vs. ostrý běh
+
+def _preruseny_ostry(koren: Path, monkeypatch) -> Path:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-klic")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-klic")
+    assert main([], koren=koren, vstup_fn=lambda _: "1", vystup=io.StringIO(),
+                tovarna_modelu=_tovarna_selze_v_hodnoceni_1) == 1
+    return max((koren / "output").iterdir(), key=lambda p: Beh.otevri(p).stav.vytvoreno)
+
+
+def _preruseny_ukazkovy(koren: Path) -> Path:
+    assert main(["--nanecisto"], koren=koren, vstup_fn=lambda _: "1", vystup=io.StringIO(),
+                tovarna_modelu=_tovarna_selze_v_hodnoceni_1) == 1
+    return max((koren / "output").iterdir(), key=lambda p: Beh.otevri(p).stav.vytvoreno)
+
+
+def test_rezim_behu_se_ulozi(koren, monkeypatch):
+    assert Beh.otevri(_preruseny_ukazkovy(koren)).stav.nanecisto is True
+    assert Beh.otevri(_preruseny_ostry(koren, monkeypatch)).stav.nanecisto is False
+
+
+def test_pokracovat_ostre_v_ukazkovem_behu_je_kod_2(koren, monkeypatch):
+    slozka = _preruseny_ukazkovy(koren)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-klic")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-klic")
+    out = io.StringIO()
+    assert main(["--pokracovat", slozka.name], koren=koren, vstup_fn=_nepouzivat, vystup=out,
+                tovarna_modelu=lambda konf, n: demo_modely()) == 2
+    assert "ukázkový" in out.getvalue() and "--nanecisto" in out.getvalue()
+    assert Beh.otevri(slozka).stav.stav == "prerusen"
+
+
+def test_pokracovat_nanecisto_v_ostrem_behu_je_kod_2(koren, monkeypatch):
+    slozka = _preruseny_ostry(koren, monkeypatch)
+    out = io.StringIO()
+    assert main(["--nanecisto", "--pokracovat", str(slozka)], koren=koren, vstup_fn=_nepouzivat,
+                vystup=out) == 2
+    assert "ostrý" in out.getvalue()
+    assert Beh.otevri(slozka).stav.stav == "prerusen"
+
+
+def test_pokracovat_bez_hodnoty_preskoci_beh_jineho_rezimu(koren, monkeypatch):
+    ostry = _preruseny_ostry(koren, monkeypatch)
+    ukazkovy = _preruseny_ukazkovy(koren)   # novější
+    assert main(["--pokracovat"], koren=koren, vstup_fn=_nepouzivat, vystup=io.StringIO(),
+                tovarna_modelu=lambda konf, n: demo_modely()) == 0
+    assert Beh.otevri(ostry).stav.stav == "dokoncen"
+    assert Beh.otevri(ukazkovy).stav.stav == "prerusen"
+    assert main(["--nanecisto", "--pokracovat"], koren=koren, vstup_fn=_nepouzivat,
+                vystup=io.StringIO()) == 0
+    assert Beh.otevri(ukazkovy).stav.stav == "dokoncen"
+
+
+def test_pokracovat_bez_hodnoty_jen_beh_jineho_rezimu_je_kod_2(koren):
+    _preruseny_ukazkovy(koren)
+    os.environ["ANTHROPIC_API_KEY"] = os.environ["OPENAI_API_KEY"] = "test-klic"
+    out = io.StringIO()
+    try:
+        assert main(["--pokracovat"], koren=koren, vstup_fn=_nepouzivat, vystup=out,
+                    tovarna_modelu=lambda konf, n: demo_modely()) == 2
+    finally:
+        os.environ.pop("ANTHROPIC_API_KEY", None)
+        os.environ.pop("OPENAI_API_KEY", None)
+    assert "přerušený" in out.getvalue() and "--nanecisto" in out.getvalue()
+
+
+def test_pokracovat_bere_modely_z_aktualniho_nastaveni(koren, monkeypatch):
+    slozka = _preruseny_ostry(koren, monkeypatch)
+    nastaveni = koren / "nastaveni.yaml"
+    nastaveni.write_text(nastaveni.read_text(encoding="utf-8")
+                         .replace("max_output_tokens: 64000", "max_output_tokens: 99000"), encoding="utf-8")
+    konfigurace = []
+
+    def tovarna(konf, n):
+        konfigurace.append(konf)
+        return demo_modely()
+
+    assert main(["--pokracovat"], koren=koren, vstup_fn=_nepouzivat, vystup=io.StringIO(),
+                tovarna_modelu=tovarna) == 0
+    assert konfigurace[0].nastaveni.modely.gpt.max_output_tokens == 99000
+    assert "ceny_usd_za_milion" in (slozka / "data" / "beh.log").read_text(encoding="utf-8")

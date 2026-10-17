@@ -33,6 +33,15 @@ def test_hlaska_klic_jmenuje_promennou():
     assert "OPENAI_API_KEY" in ChybaModelu("klic", "OpenAI").hlaska
 
 
+def test_hlaska_uriznuto_rika_co_zvysit():
+    claude = ChybaModelu("uriznuto", "Anthropic").hlaska
+    gpt = ChybaModelu("uriznuto", "OpenAI").hlaska
+    assert "uříznutá" in claude and "nastaveni.yaml" in claude and "pokracovat.bat" in claude
+    assert "max_tokens_json" in claude and "max_output_tokens" not in claude
+    assert "max_output_tokens" in gpt and "max_tokens_json" not in gpt
+    assert "ani po opakování" not in claude
+
+
 def test_hlaska_odmitnuti_s_kategorii():
     assert "cyber" in ChybaModelu("odmitnuti", "Anthropic", "cyber").hlaska
 
