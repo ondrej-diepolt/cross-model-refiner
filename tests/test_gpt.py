@@ -97,7 +97,7 @@ def test_output_parsed_none_je_nevalidni():
 
 def test_validacni_chyba_sdk_je_nevalidni():
     try:
-        Hodnoceni.model_validate_json("{")
+        Hodnoceni.model_validate_json("{}")
     except ValueError as exc:
         vyjimka = exc
     m = GptModel(nastaveni(), FalesnyKlient(vyjimka=vyjimka))
@@ -134,3 +134,14 @@ def test_chybejici_klic_je_chyba_klic():
 def test_vychozi_klient_s_klicem(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-not-real")
     assert GptModel(nastaveni()).nazev == "gpt-x"
+
+
+def test_uriznuty_json_z_parse_je_uriznuto_se_surovym_textem():
+    try:
+        Hodnoceni.model_validate_json('{"kriteria": [')
+    except Exception as exc:
+        vyjimka = exc
+    m = GptModel(nastaveni(), FalesnyKlient(vyjimka=vyjimka))
+    with pytest.raises(ChybaModelu) as e:
+        m.json("I", "Z", Hodnoceni, krok="k")
+    assert e.value.druh == "uriznuto" and e.value.surova_odpoved == '{"kriteria": ['

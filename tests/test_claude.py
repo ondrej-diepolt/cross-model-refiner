@@ -182,3 +182,14 @@ def test_vychozi_klient_s_klicem(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-not-real")
     m = ClaudeModel(nastaveni())
     assert m.nazev == "claude-opus-5-5"
+
+
+def test_uriznuty_json_z_parse_je_uriznuto_se_surovym_textem():
+    try:
+        VystupNalezitosti.model_validate_json('{"nalezitosti": [')
+    except Exception as exc:
+        vyjimka = exc
+    m = ClaudeModel(nastaveni(), FalesnyKlient(vyjimka=vyjimka))
+    with pytest.raises(ChybaModelu) as e:
+        m.json("I", "Z", VystupNalezitosti, krok="k")
+    assert e.value.druh == "uriznuto" and e.value.surova_odpoved == '{"nalezitosti": ['

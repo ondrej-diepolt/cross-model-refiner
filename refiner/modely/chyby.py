@@ -1,4 +1,7 @@
+import re
 from typing import Literal
+
+import pydantic
 
 import anthropic
 import openai
@@ -42,10 +45,36 @@ def _kod_openai(exc: Exception) -> str | None:
     return kod if isinstance(kod, str) else None
 
 
+_KLIC_RE = re.compile(r"sk-[A-Za-z0-9_\-\*]+")
+
+
+def _skryj_klice(text: str) -> str:
+    """Odstraní z textu výjimky řetězce podobné API klíči (i částečně maskované)."""
+    return _KLIC_RE.sub("sk-***", text)
+
+
+def chyba_parsovani(exc: Exception, sluzba: Sluzba) -> ChybaModelu:
+    """Převede chybu parsování strukturované odpovědi z SDK.
+
+    SDK validuje JSON dřív, než vrátí stop_reason/status, takže uříznutý JSON
+    (pydantic json_invalid, "EOF while parsing") se tu rozpozná jako uříznuté.
+    """
+    err = {}
+    if isinstance(exc, pydantic.ValidationError) and exc.errors():
+        err = exc.errors()[0]
+    surova = err.get("input") if err.get("type") == "json_invalid" else None
+    if not isinstance(surova, str):
+        surova = None
+    if surova is not None and "EOF while parsing" in err.get("msg", ""):
+        return ChybaModelu("uriznuto", sluzba, detail="EOF", surova_odpoved=surova)
+    return ChybaModelu("nevalidni_vystup", sluzba, detail=_skryj_klice(str(exc)),
+                       surova_odpoved=surova)
+
+
 def prevod_vyjimky(exc: Exception, sluzba: Sluzba) -> ChybaModelu:
     if isinstance(exc, ChybaModelu):
         return exc
-    detail = str(exc)
+    detail = _skryj_klice(str(exc))
     knihovny = (anthropic, openai)
     # APITimeoutError je podtřída APIConnectionError – nejdřív timeout.
     if any(isinstance(exc, k.APITimeoutError) for k in knihovny):

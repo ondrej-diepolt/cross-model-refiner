@@ -1,15 +1,17 @@
 """Klient OpenAI (GPT, Responses API) implementující protokol Model."""
 from __future__ import annotations
 
+import json
 import os
 from typing import Any, TypeVar
 
 import openai
+import pydantic
 from pydantic import BaseModel
 
 from refiner.data import Spotreba
 from refiner.konfigurace import NastaveniModelu
-from refiner.modely.chyby import ChybaModelu, prevod_vyjimky
+from refiner.modely.chyby import ChybaModelu, chyba_parsovani, prevod_vyjimky
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -64,8 +66,8 @@ class GptModel:
             return odp.output_parsed
         except ChybaModelu:
             raise
-        except ValueError as exc:  # pydantic.ValidationError i JSONDecodeError z parse()
-            raise ChybaModelu("nevalidni_vystup", _SLUZBA, detail=str(exc)) from exc
+        except (pydantic.ValidationError, json.JSONDecodeError) as exc:
+            raise chyba_parsovani(exc, _SLUZBA) from exc
         except Exception as exc:
             raise prevod_vyjimky(exc, _SLUZBA) from exc
 

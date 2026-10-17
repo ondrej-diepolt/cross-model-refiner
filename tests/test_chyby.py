@@ -40,3 +40,12 @@ def test_hlaska_odmitnuti_s_kategorii():
 def test_chyba_modelu_projde_beze_zmeny():
     chyba = ChybaModelu("sit", "OpenAI")
     assert prevod_vyjimky(chyba, "OpenAI") is chyba
+
+
+def test_detail_neobsahuje_klic():
+    exc = openai.AuthenticationError(
+        "Incorrect API key provided: sk-proj-****abcd and sk-ant-api03-XYZ_12",
+        response=resp(401), body=None)
+    e = prevod_vyjimky(exc, "OpenAI")
+    assert "sk-proj" not in e.detail and "abcd" not in e.detail and "XYZ" not in e.detail
+    assert "sk-" in e.detail
