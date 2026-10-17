@@ -15,8 +15,25 @@ from refiner.data import (
     sestav_kriteria,
 )
 from refiner.konfigurace import Nastaveni, nacti_konfiguraci
+from refiner.kroky import Zdroje
 
 KOREN = Path(__file__).parent.parent
+
+POPTAVKA_TEST = """# Poptávka – tabletop cvičení
+
+Zadavatel poptává přípravu a vedení tabletop cvičení pro krizový štáb (do 20 osob).
+
+Nabídka proto musí obsahovat:
+- popis metodiky cvičení,
+- harmonogram a hlavní milníky realizace,
+- cenu za celé plnění.
+"""
+
+
+def zdroje_test(koren_repa: Path) -> Zdroje:
+    """Zdroje s krátkou poptávkou, bez podkladů, s konfigurací a prompty z repa."""
+    konf = nacti_konfiguraci(koren_repa / "nastaveni.yaml", koren_repa / "profily" / "nabidka.yaml")
+    return Zdroje(poptavka=POPTAVKA_TEST, podklady="", konfigurace=konf, prompty=koren_repa / "prompty")
 
 
 def nastaveni_test() -> Nastaveni:

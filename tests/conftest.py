@@ -17,3 +17,10 @@ def _bez_site(monkeypatch):
 @pytest.fixture
 def koren_repa() -> Path:
     return Path(__file__).parent.parent
+
+
+@pytest.fixture
+def zdroje(koren_repa):
+    from tests.pomocne import zdroje_test
+
+    return zdroje_test(koren_repa)
