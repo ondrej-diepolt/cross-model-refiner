@@ -1,0 +1,2 @@
+# Dávkové soubory Windows musí mít konce řádků CRLF (i při stažení repozitáře jako ZIP).
+*.bat text eol=crlf
