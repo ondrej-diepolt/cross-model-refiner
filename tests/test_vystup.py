@@ -61,6 +61,11 @@ def test_diff_html_utf8_a_zmena():
     assert "charset=utf-8" in html.lower() and "diff_chg" in html and "v2" in html  # změna je intraline: "1<span>2</span>0"
 
 
+def test_diff_html_escapuje_html():
+    html = diff_html("<script>x</script>\n", "y\n", "a", "b")
+    assert "<script>" not in html
+
+
 def test_exportuj_docx_s_tabulkou(tmp_path):
     exportuj_docx("# Nabídka\n\n| A | B |\n|---|---|\n| 1 | 2 |\n", tmp_path / "x.docx", None)
     assert nacti_jako_markdown(tmp_path / "x.docx").count("|") >= 6
