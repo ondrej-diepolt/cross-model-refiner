@@ -62,7 +62,7 @@ def vykresli_prompt(slozka: Path, nazev: str, **promenne: str) -> str:
         ) from e
 
 
-def _spolecne(zdroje: Zdroje) -> dict[str, str]:
+def spolecne_promenne(zdroje: Zdroje) -> dict[str, str]:
     return {
         "poptavka": zdroje.poptavka,
         "podklady": zdroje.podklady if zdroje.podklady.strip() else PRAZDNE_PODKLADY,
@@ -73,7 +73,7 @@ def _text_nalezitosti(nalezitosti: list[Nalezitost]) -> str:
     return "\n".join(f"- **{n.id}** {n.text} – citace z poptávky: „{n.citace}“" for n in nalezitosti)
 
 
-def _text_kriterii(kriteria: list[Kriterium]) -> str:
+def text_kriterii(kriteria: list[Kriterium]) -> str:
     radky = []
     for k in kriteria:
         if k.skupina == "A":
@@ -97,7 +97,7 @@ def _text_odmitnutych(odmitnute: list[tuple[Navrh, Rozhodnuti]]) -> str:
     return "\n".join(bloky)
 
 
-def _sekce_dokument(dokument: str) -> str:
+def sekce_dokument(dokument: str) -> str:
     return f"## Dokument\n\n<dokument>\n{dokument}\n</dokument>"
 
 
@@ -140,7 +140,7 @@ def _sluzba(model: Model) -> Sluzba:
     return "OpenAI" if model.nazev.lower().startswith("gpt") else "Anthropic"
 
 
-def _s_opravou(
+def s_opravou(
     model: Model,
     zadani: str,
     zavolej: Callable[[str], T],
@@ -284,7 +284,7 @@ def zkontroluj_prepis(stary: str, novy: str, hodnoceni: Hodnoceni, posouzeni: Po
 def extrahuj_nalezitosti(model: Model, zdroje: Zdroje) -> tuple[list[Nalezitost], list[str]]:
     instrukce = vykresli_prompt(zdroje.prompty, "nalezitosti", poptavka=zdroje.poptavka)
     effort = zdroje.konfigurace.nastaveni.modely.claude.effort_extrakce
-    vystup = _s_opravou(
+    vystup = s_opravou(
         model,
         ZADANI_NALEZITOSTI,
         lambda z: model.json(instrukce, z, VystupNalezitosti, krok="nalezitosti", effort=effort),
@@ -301,10 +301,10 @@ def napis_navrh(model: Model, zdroje: Zdroje, nalezitosti: list[Nalezitost]) -> 
         typ_dokumentu=konf.profil.typ_dokumentu,
         pokyny_struktura=konf.profil.pokyny_struktura,
         nalezitosti=_text_nalezitosti(nalezitosti),
-        kriteria=_text_kriterii(sestav_kriteria(nalezitosti, konf.kriteria_profilu)),
-        **_spolecne(zdroje),
+        kriteria=text_kriterii(sestav_kriteria(nalezitosti, konf.kriteria_profilu)),
+        **spolecne_promenne(zdroje),
     )
-    return _s_opravou(
+    return s_opravou(
         model,
         ZADANI_NAVRH,
         lambda z: _vycisti_dokument(model.text(instrukce, z, krok="navrh_1")),
@@ -326,14 +326,14 @@ def ohodnot(
     instrukce = vykresli_prompt(
         zdroje.prompty, "hodnoceni",
         typ_dokumentu=konf.profil.typ_dokumentu,
-        kriteria=_text_kriterii(kriteria),
+        kriteria=text_kriterii(kriteria),
         max_navrhu=str(max_navrhu),
         odmitnute=_text_odmitnutych(odmitnute),
-        **_spolecne(zdroje),
+        **spolecne_promenne(zdroje),
     )
-    h = _s_opravou(
+    h = s_opravou(
         model,
-        _sekce_dokument(dokument),
+        sekce_dokument(dokument),
         lambda z: model.json(instrukce, z, Hodnoceni, krok=krok),
         lambda v: zkontroluj_hodnoceni(v, kriteria),
         lambda v: v.model_dump_json(indent=2),
@@ -359,10 +359,10 @@ def posud(
     krok: str,
 ) -> Posouzeni:
     instrukce = vykresli_prompt(
-        zdroje.prompty, "posouzeni", nalezitosti=_text_nalezitosti(nalezitosti), **_spolecne(zdroje)
+        zdroje.prompty, "posouzeni", nalezitosti=_text_nalezitosti(nalezitosti), **spolecne_promenne(zdroje)
     )
-    zadani = f"{_sekce_dokument(dokument)}\n\n## Návrhy hodnotitele\n\n{_text_navrhu(hodnoceni.navrhy)}"
-    return _s_opravou(
+    zadani = f"{sekce_dokument(dokument)}\n\n## Návrhy hodnotitele\n\n{_text_navrhu(hodnoceni.navrhy)}"
+    return s_opravou(
         model,
         zadani,
         lambda z: model.json(instrukce, z, Posouzeni, krok=krok),
@@ -381,13 +381,13 @@ def zapracuj(
     krok: str,
 ) -> str:
     instrukce = vykresli_prompt(
-        zdroje.prompty, "zapracovani", nalezitosti=_text_nalezitosti(nalezitosti), **_spolecne(zdroje)
+        zdroje.prompty, "zapracovani", nalezitosti=_text_nalezitosti(nalezitosti), **spolecne_promenne(zdroje)
     )
     zadani = (
-        f"{_sekce_dokument(dokument)}\n\n## Přijaté návrhy k zapracování\n\n"
+        f"{sekce_dokument(dokument)}\n\n## Přijaté návrhy k zapracování\n\n"
         f"{_text_prijatych(hodnoceni, posouzeni)}"
     )
-    return _s_opravou(
+    return s_opravou(
         model,
         zadani,
         lambda z: _vycisti_dokument(model.text(instrukce, z, krok=krok)),

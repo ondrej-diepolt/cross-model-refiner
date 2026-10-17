@@ -3,7 +3,7 @@ chcp 65001 >nul
 cd /d "%~dp0"
 setlocal
 
-rem Připraví prostředí .venv a nainstaluje závislosti. Volá ho spustit.bat a pokracovat.bat.
+rem Připraví prostředí .venv a nainstaluje závislosti. Volá ho spustit.bat, pokracovat.bat a porovnat.bat.
 
 rem Najde Python 3.10+ (nejdřív spouštěč py, pak python v PATH).
 set "PYTHON="

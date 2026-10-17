@@ -1,7 +1,7 @@
-"""Příkazová řádka (design kap. 8): nový běh, --pokracovat, --nanecisto; výběr vstupu a profilu.
+"""Příkazová řádka (design kap. 8): nový běh, --pokracovat, --nanecisto, porovnat; výběr vstupu a profilu.
 
-Návratové kódy: 0 hotovo, 1 běh přerušen (uložen, lze pokračovat), 2 chyba konfigurace,
-vstupu nebo uživatele. Do konzole jdou jen české hlášky; technické detaily zapisuje
+Návratové kódy: 0 hotovo, 1 běh (nebo porovnání) přerušen, uložen a lze ho zopakovat,
+2 chyba konfigurace, vstupu nebo uživatele. Do konzole jdou jen české hlášky; technické detaily zapisuje
 aplikace.dokonci do data/beh.log (žádný konzolový handler logování se tu nepřidává).
 """
 from __future__ import annotations
@@ -17,7 +17,16 @@ from typing import TextIO
 
 from dotenv import load_dotenv
 
-from refiner.aplikace import HLASKA_CTRL_C, dokonci, najdi_posledni_beh, obnov_beh, zahaj_beh
+from refiner.aplikace import (
+    HLASKA_CTRL_C,
+    dokonci,
+    najdi_posledni_beh,
+    obnov_beh,
+    obnov_prompty_porovnani,
+    otevri_dokonceny,
+    porovnej_beh,
+    zahaj_beh,
+)
 from refiner.konfigurace import (
     ChybaKonfigurace,
     Konfigurace,
@@ -30,17 +39,22 @@ from refiner.modely.claude import ClaudeModel
 from refiner.modely.falesne import demo_modely
 from refiner.modely.gpt import GptModel
 from refiner.modely.rozhrani import Model
+from refiner.porovnani import nacti_referenci, najdi_referenci
 from refiner.vstup import ChybaVstupu, najdi_vstupy
 
 KOREN = Path(__file__).resolve().parent.parent
 
 KLICE: tuple[tuple[str, Sluzba], ...] = (("ANTHROPIC_API_KEY", "Anthropic"), ("OPENAI_API_KEY", "OpenAI"))
+KLIC_HODNOTITELE: tuple[tuple[str, Sluzba], ...] = (("OPENAI_API_KEY", "OpenAI"),)
 
 HLASKA_VZOR_ENV = "Vzor najdete v souboru .env.example."
 HLASKA_ENV_KODOVANI = "Soubor .env nelze přečíst – uložte ho v kódování UTF-8."
 HLASKA_ZADNY_VSTUP = "Ve složce input/ není žádná poptávka (DOCX, MD nebo TXT)."
 HLASKA_ZADNY_PROFIL = "Ve složce profily/ není žádný profil dokumentu (*.yaml)."
 HLASKA_ZADNY_PRERUSENY = "Ve složce output/ není žádný přerušený běh, ve kterém by šlo pokračovat."
+HLASKA_ZADNY_DOKONCENY = "Ve složce output/ není žádný dokončený běh, který by šlo porovnat s referencí."
+HLASKA_POROVNAT_VOLBY = ("Příkaz porovnat nejde kombinovat s --nanecisto ani --pokracovat "
+                         "(porovnání volá skutečný model GPT).")
 HLASKA_KONEC_VSTUPU = "Volba nebyla zadána (konec vstupu)."
 HLASKA_NANECISTO = "Ukázkový režim --nanecisto: falešné modely, bez volání API a bez nákladů."
 
@@ -124,8 +138,12 @@ def _vychozi_tovarna(konfigurace: Konfigurace, nanecisto: bool) -> tuple[Model, 
     return ClaudeModel(modely), GptModel(modely)
 
 
-def _chybejici_klice() -> list[Sluzba]:
-    return [sluzba for promenna, sluzba in KLICE if not os.environ.get(promenna, "").strip()]
+def _vychozi_hodnotitel(konfigurace: Konfigurace) -> Model:
+    return GptModel(konfigurace.nastaveni.modely)
+
+
+def _chybejici_klice(klice: tuple[tuple[str, Sluzba], ...] = KLICE) -> list[Sluzba]:
+    return [sluzba for promenna, sluzba in klice if not os.environ.get(promenna, "").strip()]
 
 
 def _otazka_profilu(nazvy: list[str]) -> str:
@@ -156,12 +174,21 @@ def _zvol_vstup(koren: Path, konzole: _Konzole, vstup_fn: Callable[[str], str]) 
     return vstupy[_vyber(konzole, vstup_fn, "Kterou poptávku zpracovat?", [p.name for p in vstupy])]
 
 
-def _slozka_behu(koren: Path, hodnota: str) -> Path | None:
+def _slozka_behu(koren: Path, hodnota: str, stavy: set[str]) -> Path | None:
     if not hodnota:
-        return najdi_posledni_beh(koren / "output", PRERUSENE_STAVY)
+        return najdi_posledni_beh(koren / "output", stavy)
     cesta = Path(hodnota)
     if not cesta.is_absolute() and not cesta.exists() and (koren / "output" / cesta).exists():
         cesta = koren / "output" / cesta
+    return cesta
+
+
+def _cesta_reference(koren: Path, hodnota: str | None) -> Path:
+    if hodnota is None:
+        return najdi_referenci(koren)
+    cesta = Path(hodnota)
+    if not cesta.is_absolute() and not cesta.exists() and (koren / cesta).exists():
+        cesta = koren / cesta
     return cesta
 
 
@@ -174,6 +201,15 @@ def _parser() -> argparse.ArgumentParser:
                    help="ukázkový běh s falešnými modely, bez volání API a bez nákladů")
     p.add_argument("--pokracovat", nargs="?", const="", default=None, metavar="SLOZKA",
                    help="dokončí přerušený běh (bez hodnoty poslední přerušený v output/)")
+    podprikazy = p.add_subparsers(dest="prikaz", metavar="PRIKAZ")
+    porovnat = podprikazy.add_parser(
+        "porovnat", help="porovná dokončený běh s referenční nabídkou (potřebuje jen OPENAI_API_KEY)",
+        description="Porovná dokončený běh s ručně dotaženou referenční nabídkou (výstup porovnani.html).",
+    )
+    porovnat.add_argument("slozka", nargs="?", default="", metavar="SLOZKA",
+                          help="složka běhu (bez hodnoty poslední dokončený běh v output/)")
+    porovnat.add_argument("--reference", default=None, metavar="SOUBOR",
+                          help="referenční nabídka (výchozí: jediný soubor ve složce examples/)")
     return p
 
 
@@ -197,9 +233,12 @@ def main(
         args = _parser().parse_args(argv)
     except SystemExit as e:   # --help nebo neplatný argument (argparse vypíše na stderr)
         return e.code if isinstance(e.code, int) else 2
+    # Porovnání volá jen hodnotitele: skutečný GPT nepotřebuje klíč Anthropic.
+    hodnotitel_fn = ((lambda konf: tovarna_modelu(konf, False)[1]) if tovarna_modelu is not None
+                     else _vychozi_hodnotitel)
     try:
         return _spust(args, Path(koren) if koren is not None else KOREN, vstup_fn, konzole,
-                      tovarna_modelu or _vychozi_tovarna, otevrit_prehled)
+                      tovarna_modelu or _vychozi_tovarna, hodnotitel_fn, otevrit_prehled)
     finally:
         konzole.ukonci()
 
@@ -210,8 +249,13 @@ def _spust(
     vstup_fn: Callable[[str], str],
     konzole: _Konzole,
     tovarna: TovarnaModelu,
+    hodnotitel_fn: Callable[[Konfigurace], Model],
     otevrit_prehled: bool,
 ) -> int:
+    porovnat = args.prikaz == "porovnat"
+    if porovnat and (args.nanecisto or args.pokracovat is not None):
+        konzole(HLASKA_POROVNAT_VOLBY)
+        return 2
     try:
         load_dotenv(koren / ".env", encoding="utf-8")
     except (UnicodeDecodeError, OSError):   # .env uložený v ANSI/cp1250 nebo UTF-16
@@ -220,15 +264,26 @@ def _spust(
     if args.nanecisto:
         konzole(HLASKA_NANECISTO)
     else:
-        chybi = _chybejici_klice()
+        chybi = _chybejici_klice(KLIC_HODNOTITELE if porovnat else KLICE)
         for sluzba in chybi:
             konzole(f"{ChybaModelu('klic', sluzba).hlaska} {HLASKA_VZOR_ENV}")
         if chybi:
             return 2
 
     try:
-        if args.pokracovat is not None:
-            slozka = _slozka_behu(koren, args.pokracovat)
+        if porovnat:
+            slozka = _slozka_behu(koren, args.slozka, {"dokoncen"})
+            if slozka is None:
+                konzole(HLASKA_ZADNY_DOKONCENY)
+                return 2
+            beh, zdroje = otevri_dokonceny(slozka)
+            obnov_prompty_porovnani(beh, koren / "prompty")
+            reference = _cesta_reference(koren, args.reference)
+            reference_md = nacti_referenci(reference)
+            hodnotitel = hodnotitel_fn(zdroje.konfigurace)
+            konzole(f"Porovnávám běh {beh.slozka} s referencí {reference.name}")
+        elif args.pokracovat is not None:
+            slozka = _slozka_behu(koren, args.pokracovat, PRERUSENE_STAVY)
             if slozka is None:
                 konzole(HLASKA_ZADNY_PRERUSENY)
                 return 2
@@ -263,12 +318,17 @@ def _spust(
         konzole(f"Běh se nepodařilo připravit: {type(e).__name__}: {e}")
         return 2
 
-    sablona = koren / "podklady" / "sablona.docx"
-    kod = dokonci(beh, zdroje, pisatel, hodnotitel, konzole,
-                  sablona if sablona.is_file() else None)
+    if porovnat:
+        kod = porovnej_beh(beh, zdroje, reference_md, hodnotitel, konzole, reference.name)
+        html = "porovnani.html"
+    else:
+        sablona = koren / "podklady" / "sablona.docx"
+        kod = dokonci(beh, zdroje, pisatel, hodnotitel, konzole,
+                      sablona if sablona.is_file() else None)
+        html = "prehled.html"
     if kod == 0 and otevrit_prehled:
         try:
-            webbrowser.open((beh.slozka / "prehled.html").resolve().as_uri())
+            webbrowser.open((beh.slozka / html).resolve().as_uri())
         except Exception:
-            pass   # přehled je jen pohodlí navíc; cestu už vypsal dokonci()
+            pass   # přehled je jen pohodlí navíc; cestu už vypsal dokonci() / porovnej_beh()
     return kod

@@ -37,7 +37,13 @@ def _nacti_text(cesta: Path) -> str:
         return data.decode("cp1250")
 
 
+def _jednotne_konce_radku(text: str) -> str:
+    r"""Převede CRLF/CR na LF; jinak by zápis v textovém režimu na Windows vyrobil \r\r\n."""
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
 def nacti_jako_markdown(cesta: Path) -> str:
+    """Text souboru jako Markdown (DOCX přes pandoc) s konci řádků LF."""
     cesta = Path(cesta)
     if cesta.suffix.lower() == ".docx":
         text = pypandoc.convert_file(str(cesta), "gfm")
@@ -45,7 +51,7 @@ def nacti_jako_markdown(cesta: Path) -> str:
         text = _nacti_text(cesta)
     if not text.strip():
         raise ChybaVstupu(f"Soubor {cesta.name} neobsahuje žádný text.")
-    return text
+    return _jednotne_konce_radku(text)
 
 
 def nacti_podklady(slozka: Path) -> str:

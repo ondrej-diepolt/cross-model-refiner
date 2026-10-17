@@ -1,4 +1,4 @@
-"""Spuštění: python -m refiner [--nanecisto] | --pokracovat [SLOZKA]."""
+"""Spuštění: python -m refiner [--nanecisto] | --pokracovat [SLOZKA] | porovnat [SLOZKA] [--reference SOUBOR]."""
 from refiner.cli import main
 
 if __name__ == "__main__":

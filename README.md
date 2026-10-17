@@ -104,6 +104,35 @@ Pozor: pokračující běh používá **kopii konfigurace a promptů uloženou v
 (`data/konfigurace/`). Úprava `prompty/`, `profily/` nebo `nastaveni.yaml` v repozitáři se na
 pokračování už rozběhnutého běhu neprojeví – platí jen pro nové běhy.
 
+## Porovnání s referencí
+
+Porovná dokončený běh s ručně dotaženou referenční nabídkou. Slouží k ladění promptů a kritérií
+a k ověření, že je výsledek reálně použitelný.
+
+1. Vložte referenční nabídku (DOCX, MD nebo TXT) do složky `examples/` – **právě jeden soubor**.
+   Generování nabídek složku `examples/` nikdy nečte; referenci uvidí jen hodnotitel (GPT)
+   při porovnání. Potřeba je jen klíč `OPENAI_API_KEY`.
+2. Dvakrát klikněte na **`porovnat.bat`** – porovná poslední dokončený běh v `output/`. Konkrétní
+   běh porovnáte přetažením jeho složky na `porovnat.bat`. Jiná reference:
+   `porovnat.bat SLOZKA_BEHU --reference cesta\k\nabidce.docx`.
+3. Ve složce běhu vznikne **`porovnani.html`** (otevře se v prohlížeči):
+   - **Kalibrace hodnotitele** – reference projde stejným hodnocením jako generovaná nabídka.
+     Když ani ručně dotažená nabídka nedosáhne cílového skóre, je práh pro tohoto hodnotitele
+     nereálný, nebo kritéria měří něco jiného, než chceme.
+   - **Párové srovnání po kritériích** – GPT porovná oba dokumenty anonymizované jako A/B dvakrát,
+     s prohozeným pořadím; při rozporu je výsledek „nerozhodně“.
+   - **Pokrytí obsahu** – konkrétní prvky reference a zda jsou v generované nabídce
+     (chybějící první – přímý podnět pro úpravu promptů a profilu).
+4. Vyplňte **`porovnani_formular.md`** (odeslal bych to? kolik minut práce do odeslatelné verze?
+   věcné chyby? co chybí? co je lepší než v referenci?). To je skutečné měřítko úspěchu.
+
+Porovnání stojí 5 volání GPT (spotřeba se připíše do `data/beh.json` běhu, stav běhu se nemění)
+a dá se opakovat: výsledky se přepíšou, vyplněný formulář zůstane. Prompty porovnání
+(`prompty/porovnani_*.md`) se berou vždy aktuální z repozitáře; kalibrace hodnotí promptem
+uloženým v běhu, stejně jako generovanou nabídku. Pro férové srovnání vyplňte
+`podklady/profil_firmy.md` stejnými fakty, jaké má reference (sazba, tým, reference) – jinak bude
+generovaná nabídka v kapitolách cena, tým a reference z definice horší.
+
 ## Ukázka bez nákladů
 
 ```
@@ -125,8 +154,9 @@ v `prehled.html`.
 ```
 .venv\Scripts\python.exe -m refiner [--nanecisto]
 .venv\Scripts\python.exe -m refiner --pokracovat [SLOZKA_BEHU]
+.venv\Scripts\python.exe -m refiner porovnat [SLOZKA_BEHU] [--reference SOUBOR]
 .venv\Scripts\python.exe -m pytest
 ```
 
-Návratové kódy: 0 hotovo, 1 běh přerušen (lze pokračovat), 2 chyba konfigurace, vstupu nebo
-chybějící klíč. Testy nevolají síť ani API.
+Návratové kódy: 0 hotovo, 1 běh přerušen (lze pokračovat) nebo porovnání selhalo (lze zopakovat),
+2 chyba konfigurace, vstupu nebo chybějící klíč. Testy nevolají síť ani API.

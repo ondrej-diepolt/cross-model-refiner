@@ -32,6 +32,19 @@ def test_md_s_bom(tmp_path):
     assert nacti_jako_markdown(p) == "Ahoj"
 
 
+def test_konce_radku_crlf_a_cr_se_sjednoti(tmp_path):
+    r"""Jinak by zápis v textovém režimu na Windows vyrobil \r\r\n (dvojité řádky)."""
+    p = tmp_path / "a.md"
+    p.write_bytes(b"# Popt\r\n\r\nText.\rDalsi\r\n")
+    assert nacti_jako_markdown(p) == "# Popt\n\nText.\nDalsi\n"
+
+
+def test_podklady_crlf(tmp_path):
+    (tmp_path / "profil.md").write_bytes(b"Firma\r\nIC\r\n")
+    out = nacti_podklady(tmp_path)
+    assert "Firma\nIC" in out and "\r" not in out
+
+
 def test_prazdny_vstup(tmp_path):
     p = tmp_path / "prazdny.md"
     p.write_text("   \n", encoding="utf-8")
