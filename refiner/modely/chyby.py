@@ -7,8 +7,11 @@ import anthropic
 import openai
 
 DruhChyby = Literal["klic", "kredit", "pretizeni", "sit", "timeout",
-                    "nevalidni_vystup", "uriznuto", "odmitnuti", "jina"]
-Sluzba = Literal["Anthropic", "OpenAI"]
+                    "nevalidni_vystup", "uriznuto", "odmitnuti", "jina",
+                    "nenainstalovano", "neprihlasen", "limit_predplatneho", "model_nedostupny"]
+Sluzba = Literal["Anthropic", "OpenAI", "Claude Code", "Codex"]
+# Služby poskytované přes CLI nástroje (režim predplatne).
+NASTROJE: frozenset[Sluzba] = frozenset({"Claude Code", "Codex"})
 
 HLASKY: dict[DruhChyby, str] = {
     "klic": "Klíč {klic} v souboru .env chybí nebo je neplatný.",
@@ -21,10 +24,24 @@ HLASKY: dict[DruhChyby, str] = {
                  "nastaveni.yaml limit {limit} a spusťte pokracovat.bat."),
     "odmitnuti": "Model {sluzba} úlohu odmítl (kategorie: {detail}).",
     "jina": "Neočekávaná chyba služby {sluzba}: {detail}",
+    "nenainstalovano": ("Nástroj {sluzba} není nainstalovaný (příkaz {prikaz} nebyl nalezen). "
+                        "Nainstalujte ho podle README, nebo v nastaveni.yaml přepněte modely.rezim na api."),
+    "neprihlasen": ("Nástroj {sluzba} není přihlášený předplatným. Přihlaste se příkazem {prihlaseni} "
+                    "a spusťte nástroj znovu (přerušený běh dokončí pokracovat.bat)."),
+    "limit_predplatneho": ("Vyčerpali jste limit předplatného u {sluzba} ({detail}). "
+                           "Až se limit obnoví, spusťte pokracovat.bat."),
+    "model_nedostupny": ("Model {detail} není s vaším předplatným {sluzba} dostupný. "
+                         "Změňte ho v nastaveni.yaml v oddílu modely.predplatne."),
+}
+# U nástrojů nejde délku odpovědi v nastavení změnit, proto bez odkazu na limit.
+_HLASKY_NASTROJU: dict[DruhChyby, str] = {
+    "uriznuto": "Odpověď modelu {sluzba} byla uříznutá (příliš dlouhá).",
 }
 
 _KLICE = {"Anthropic": "ANTHROPIC_API_KEY", "OpenAI": "OPENAI_API_KEY"}
 # Položky nastaveni.yaml omezující délku odpovědi (pokračující běh je bere z repozitáře).
+_PRIKAZY = {"Claude Code": "claude", "Codex": "codex"}
+_PRIHLASENI = {"Claude Code": "claude (v něm /login)", "Codex": "codex login"}
 _LIMITY = {"Anthropic": "max_tokens_json (u textu max_tokens_text) v oddílu modely.claude",
            "OpenAI": "max_output_tokens v oddílu modely.gpt"}
 
@@ -36,8 +53,10 @@ class ChybaModelu(Exception):
         self.sluzba = sluzba
         self.detail = detail
         self.surova_odpoved = surova_odpoved
-        self.hlaska = HLASKY[druh].format(klic=_KLICE[sluzba], sluzba=sluzba, detail=detail,
-                                          limit=_LIMITY[sluzba])
+        sablona = _HLASKY_NASTROJU.get(druh) if sluzba in NASTROJE else None
+        self.hlaska = (sablona or HLASKY[druh]).format(
+            klic=_KLICE.get(sluzba, ""), sluzba=sluzba, detail=detail, limit=_LIMITY.get(sluzba, ""),
+            prikaz=_PRIKAZY.get(sluzba, ""), prihlaseni=_PRIHLASENI.get(sluzba, ""))
         super().__init__(self.hlaska)
 
 
@@ -53,9 +72,12 @@ def _kod_openai(exc: Exception) -> str | None:
 _KLIC_RE = re.compile(r"sk-[A-Za-z0-9_\-\*]+")
 
 
-def _skryj_klice(text: str) -> str:
+def skryj_klice(text: str) -> str:
     """Odstraní z textu výjimky řetězce podobné API klíči (i částečně maskované)."""
     return _KLIC_RE.sub("sk-***", text)
+
+
+_skryj_klice = skryj_klice  # alias kvůli stávajícímu kódu
 
 
 def chyba_parsovani(exc: Exception, sluzba: Sluzba) -> ChybaModelu:
@@ -72,14 +94,14 @@ def chyba_parsovani(exc: Exception, sluzba: Sluzba) -> ChybaModelu:
         surova = None
     if surova is not None and "EOF while parsing" in err.get("msg", ""):
         return ChybaModelu("uriznuto", sluzba, detail="EOF", surova_odpoved=surova)
-    return ChybaModelu("nevalidni_vystup", sluzba, detail=_skryj_klice(str(exc)),
+    return ChybaModelu("nevalidni_vystup", sluzba, detail=skryj_klice(str(exc)),
                        surova_odpoved=surova)
 
 
 def prevod_vyjimky(exc: Exception, sluzba: Sluzba) -> ChybaModelu:
     if isinstance(exc, ChybaModelu):
         return exc
-    detail = _skryj_klice(str(exc))
+    detail = skryj_klice(str(exc))
     knihovny = (anthropic, openai)
     # APITimeoutError je podtřída APIConnectionError – nejdřív timeout.
     if any(isinstance(exc, k.APITimeoutError) for k in knihovny):

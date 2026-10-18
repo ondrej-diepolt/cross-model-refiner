@@ -58,3 +58,45 @@ def test_detail_neobsahuje_klic():
     e = prevod_vyjimky(exc, "OpenAI")
     assert "sk-proj" not in e.detail and "abcd" not in e.detail and "XYZ" not in e.detail
     assert "sk-" in e.detail
+
+
+@pytest.mark.parametrize("sluzba,prikaz", [("Claude Code", "claude"), ("Codex", "codex")])
+def test_nenainstalovano_jmenuje_prikaz(sluzba, prikaz):
+    h = ChybaModelu("nenainstalovano", sluzba).hlaska
+    assert f"příkaz {prikaz} nebyl nalezen" in h and "modely.rezim na api" in h
+
+
+def test_neprihlasen_codex_rika_jak_se_prihlasit():
+    assert "codex login" in ChybaModelu("neprihlasen", "Codex").hlaska
+
+
+def test_neprihlasen_claude_rika_jak_se_prihlasit():
+    assert "/login" in ChybaModelu("neprihlasen", "Claude Code").hlaska
+
+
+def test_limit_obsahuje_text_nastroje():
+    h = ChybaModelu("limit_predplatneho", "Claude Code", "You've hit your session limit · resets 3:45pm").hlaska
+    assert "resets 3:45pm" in h and "pokracovat.bat" in h
+
+
+def test_model_nedostupny_jmenuje_model():
+    assert "gpt-6-astra" in ChybaModelu("model_nedostupny", "Codex", "gpt-6-astra").hlaska
+
+
+def test_uriznuto_nastroje_bez_odkazu_na_limit():
+    h = ChybaModelu("uriznuto", "Codex").hlaska
+    assert "uříznutá" in h and "nastaveni.yaml" not in h
+
+
+def test_uriznuto_api_odkazuje_na_limit():
+    assert "nastaveni.yaml" in ChybaModelu("uriznuto", "OpenAI").hlaska
+
+
+def test_timeout_nastroje():
+    assert "Claude Code neodpověděla včas" in ChybaModelu("timeout", "Claude Code").hlaska
+
+
+def test_skryj_klice_je_verejna():
+    from refiner.modely.chyby import skryj_klice
+
+    assert "sk-abc123" not in skryj_klice("boom sk-abc123")
