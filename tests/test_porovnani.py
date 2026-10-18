@@ -396,6 +396,9 @@ def test_cli_porovnat_bez_slozky(koren, monkeypatch):
 
 def test_cli_porovnat_jen_s_klicem_openai(koren, monkeypatch):
     _dokonceny_beh_cli(koren)
+    nastaveni = koren / "nastaveni.yaml"   # klíče se kontrolují jen v režimu api
+    nastaveni.write_text(nastaveni.read_text(encoding="utf-8").replace("rezim: predplatne", "rezim: api"),
+                         encoding="utf-8")
     out = io.StringIO()
     assert main(["porovnat"], koren=koren, vystup=out) == 2
     assert "OPENAI_API_KEY" in out.getvalue() and "ANTHROPIC_API_KEY" not in out.getvalue()
