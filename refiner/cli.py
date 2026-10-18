@@ -33,9 +33,12 @@ from refiner.konfigurace import (
     cesta_kriterii_k_poptavce,
     dostupne_profily,
     nacti_konfiguraci,
+    nacti_nastaveni,
 )
 from refiner.modely.chyby import ChybaModelu, Sluzba
 from refiner.modely.claude import ClaudeModel
+from refiner.modely.claude_cli import ClaudeCliModel
+from refiner.modely.codex_cli import CodexModel
 from refiner.modely.falesne import demo_modely
 from refiner.modely.gpt import GptModel
 from refiner.modely.rozhrani import Model
@@ -139,11 +142,14 @@ def _vychozi_tovarna(konfigurace: Konfigurace, nanecisto: bool) -> tuple[Model, 
     if nanecisto:
         return demo_modely()
     modely = konfigurace.nastaveni.modely
-    return ClaudeModel(modely), GptModel(modely)
+    if modely.rezim == "api":
+        return ClaudeModel(modely), GptModel(modely)
+    return ClaudeCliModel(modely), CodexModel(modely)
 
 
 def _vychozi_hodnotitel(konfigurace: Konfigurace) -> Model:
-    return GptModel(konfigurace.nastaveni.modely)
+    modely = konfigurace.nastaveni.modely
+    return GptModel(modely) if modely.rezim == "api" else CodexModel(modely)
 
 
 def _chybejici_klice(klice: tuple[tuple[str, Sluzba], ...] = KLICE) -> list[Sluzba]:
@@ -208,7 +214,7 @@ def _parser() -> argparse.ArgumentParser:
                    help="dokončí přerušený běh (bez hodnoty poslední přerušený v output/)")
     podprikazy = p.add_subparsers(dest="prikaz", metavar="PRIKAZ")
     porovnat = podprikazy.add_parser(
-        "porovnat", help="porovná dokončený běh s referenční nabídkou (potřebuje jen OPENAI_API_KEY)",
+        "porovnat", help="porovná dokončený běh s referenční nabídkou (volá jen hodnotitele GPT)",
         description="Porovná dokončený běh s ručně dotaženou referenční nabídkou (výstup porovnani.html).",
     )
     porovnat.add_argument("slozka", nargs="?", default="", metavar="SLOZKA",
@@ -238,7 +244,7 @@ def main(
         args = _parser().parse_args(argv)
     except SystemExit as e:   # --help nebo neplatný argument (argparse vypíše na stderr)
         return e.code if isinstance(e.code, int) else 2
-    # Porovnání volá jen hodnotitele: skutečný GPT nepotřebuje klíč Anthropic.
+    # Porovnání volá jen hodnotitele: skutečný GPT (resp. Codex) nepotřebuje Claude.
     hodnotitel_fn = ((lambda konf: tovarna_modelu(konf, False)[1]) if tovarna_modelu is not None
                      else _vychozi_hodnotitel)
     try:
@@ -269,11 +275,18 @@ def _spust(
     if args.nanecisto:
         konzole(HLASKA_NANECISTO)
     else:
-        chybi = _chybejici_klice(KLIC_HODNOTITELE if porovnat else KLICE)
-        for sluzba in chybi:
-            konzole(f"{ChybaModelu('klic', sluzba).hlaska} {HLASKA_VZOR_ENV}")
-        if chybi:
+        # Oddíl modely (a tedy režim) se bere vždy z nastaveni.yaml v repozitáři, i při --pokracovat.
+        try:
+            rezim = nacti_nastaveni(koren / "nastaveni.yaml").modely.rezim
+        except ChybaKonfigurace as e:
+            konzole(str(e))
             return 2
+        if rezim == "api":
+            chybi = _chybejici_klice(KLIC_HODNOTITELE if porovnat else KLICE)
+            for sluzba in chybi:
+                konzole(f"{ChybaModelu('klic', sluzba).hlaska} {HLASKA_VZOR_ENV}")
+            if chybi:
+                return 2
 
     try:
         if porovnat:

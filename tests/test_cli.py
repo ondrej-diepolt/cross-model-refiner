@@ -109,7 +109,15 @@ def test_hlaseni_neshodi_proud_bez_reconfigure(koren):
 
 # ---------------------------------------------------------------- chyby uživatele a konfigurace
 
+def _rezim_api(koren: Path) -> None:
+    nastaveni = koren / "nastaveni.yaml"
+    text = nastaveni.read_text(encoding="utf-8")
+    assert "rezim: predplatne" in text
+    nastaveni.write_text(text.replace("rezim: predplatne", "rezim: api"), encoding="utf-8")
+
+
 def test_chybejici_klic(koren):
+    _rezim_api(koren)
     out = io.StringIO()
     assert main([], koren=koren, vstup_fn=_nepouzivat, vystup=out) == 2
     assert "ANTHROPIC_API_KEY" in out.getvalue() and ".env.example" in out.getvalue()
@@ -117,6 +125,7 @@ def test_chybejici_klic(koren):
 
 
 def test_chybejici_klic_openai(koren, monkeypatch):
+    _rezim_api(koren)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-klic")
     out = io.StringIO()
     assert main([], koren=koren, vstup_fn=_nepouzivat, vystup=out) == 2
@@ -124,6 +133,7 @@ def test_chybejici_klic_openai(koren, monkeypatch):
 
 
 def test_klic_z_env_souboru(koren):
+    _rezim_api(koren)
     (koren / ".env").write_text("ANTHROPIC_API_KEY=a\nOPENAI_API_KEY=b\n", encoding="utf-8")
     pouzite = []
 
@@ -138,6 +148,69 @@ def test_klic_z_env_souboru(koren):
         os.environ.pop("ANTHROPIC_API_KEY", None)
         os.environ.pop("OPENAI_API_KEY", None)
     assert pouzite == [False]
+
+
+def test_predplatne_nekontroluje_klice(koren):
+    out = io.StringIO()
+    assert main([], koren=koren, vstup_fn=lambda _: "1", vystup=out,
+                tovarna_modelu=lambda konf, nanecisto: demo_modely()) == 0
+    assert "ANTHROPIC_API_KEY" not in out.getvalue() and "OPENAI_API_KEY" not in out.getvalue()
+
+
+def test_porovnat_v_rezimu_api_kontroluje_jen_openai(koren):
+    _rezim_api(koren)
+    out = io.StringIO()
+    assert main(["porovnat"], koren=koren, vstup_fn=_nepouzivat, vystup=out) == 2
+    assert "OPENAI_API_KEY" in out.getvalue() and "ANTHROPIC_API_KEY" not in out.getvalue()
+
+
+def _konfigurace_s_rezimem(zdroje, rezim):
+    nastaveni = zdroje.konfigurace.nastaveni
+    modely = nastaveni.modely.model_copy(update={"rezim": rezim})
+    return zdroje.konfigurace.__class__(
+        nastaveni.model_copy(update={"modely": modely}), zdroje.konfigurace.profil,
+        zdroje.konfigurace.profil_nazev, zdroje.konfigurace.kriteria_profilu)
+
+
+def test_vychozi_tovarna_podle_rezimu(zdroje, monkeypatch):
+    import refiner.cli as cli
+
+    for nazev in ("ClaudeCliModel", "CodexModel", "ClaudeModel", "GptModel"):
+        monkeypatch.setattr(cli, nazev, type(nazev, (), {"__init__": lambda self, *a, **k: None}))
+
+    def typy(dvojice):
+        return tuple(type(m).__name__ for m in dvojice)
+
+    predplatne = _konfigurace_s_rezimem(zdroje, "predplatne")
+    api = _konfigurace_s_rezimem(zdroje, "api")
+    assert typy(cli._vychozi_tovarna(predplatne, False)) == ("ClaudeCliModel", "CodexModel")
+    assert typy(cli._vychozi_tovarna(api, False)) == ("ClaudeModel", "GptModel")
+    assert type(cli._vychozi_hodnotitel(predplatne)).__name__ == "CodexModel"
+    assert type(cli._vychozi_hodnotitel(api)).__name__ == "GptModel"
+    assert cli._vychozi_tovarna(predplatne, True)[1].nazev.startswith("gpt")   # demo modely
+
+
+def test_predplatne_nepripraveny_nastroj_je_kod_2(koren, monkeypatch):
+    monkeypatch.setattr("shutil.which", lambda _: None)
+    out = io.StringIO()
+    assert main([], koren=koren, vstup_fn=lambda _: "1", vystup=out) == 2
+    assert "příkaz claude nebyl nalezen" in out.getvalue()
+    assert not (koren / "output").exists() or not any((koren / "output").iterdir())
+
+
+def test_neplatny_rezim_je_kod_2(koren):
+    nastaveni = koren / "nastaveni.yaml"
+    nastaveni.write_text(nastaveni.read_text(encoding="utf-8").replace("rezim: predplatne", "rezim: xyz"),
+                         encoding="utf-8")
+    out = io.StringIO()
+    assert main([], koren=koren, vstup_fn=_nepouzivat, vystup=out) == 2
+    assert "modely.rezim" in out.getvalue()
+    assert not (koren / "output").exists() or not any((koren / "output").iterdir())
+
+
+def test_nanecisto_nenacita_nastaveni_a_nepotrebuje_nastroje(koren, monkeypatch):
+    monkeypatch.setattr("shutil.which", lambda _: None)
+    assert main(["--nanecisto"], koren=koren, vstup_fn=lambda _: "1", vystup=io.StringIO()) == 0
 
 
 @pytest.mark.parametrize("kodovani", ["cp1250", "utf-16"])

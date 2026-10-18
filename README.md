@@ -11,6 +11,9 @@ Výsledkem je hotový dokument (DOCX a Markdown) a přehled celého běhu v proh
   jakýchkoli úprav**. Žádná anonymizace neprobíhá.
 - Data z API se podle podmínek obou poskytovatelů standardně nepoužívají k trénování. Nastavení
   organizace (doba uchovávání dat) je ale potřeba ověřit v konzolích obou účtů.
+- **Ve výchozím režimu předplatného** (viz níže) data neodcházejí přes API, ale přes přihlášené
+  nástroje Claude Code a Codex. Platí pro ně podmínky a nastavení soukromí vašich předplatných
+  (Claude Max, ChatGPT), které se od podmínek API mohou lišit – ověřte je v nastavení obou účtů.
 - Poptávka obvykle není důvěrná. Profil firmy obsahuje osobní údaje členů týmu.
 - Příkaz **`porovnat`** (`porovnat.bat`) posílá službě **OpenAI navíc celou referenční nabídku**
   z `examples/` – včetně jmen členů týmu, cen a referencí – spolu s generovanou nabídkou
@@ -23,13 +26,30 @@ Výsledkem je hotový dokument (DOCX a Markdown) a přehled celého běhu v proh
 
 1. Nainstalujte **Python 3.10 nebo novější** z [python.org](https://www.python.org/downloads/).
    Při instalaci zaškrtněte **„Add python.exe to PATH“**.
-2. Zkopírujte soubor `.env.example` jako `.env` a doplňte do něj oba API klíče
-   (`ANTHROPIC_API_KEY` a `OPENAI_API_KEY`; kde je získat, je napsáno přímo v souboru).
-   Soubor `.env` nikomu neposílejte a neukládejte do gitu.
+2. Výchozí režim je **předplatné** (`modely.rezim: predplatne` v `nastaveni.yaml`) a soubor `.env`
+   ani API klíče nepotřebuje. Nainstalujte a přihlaste oba nástroje:
+   - **Claude Code**: nainstalujte ho a v příkazovém řádku spusťte `claude`, v něm `/login`
+     a přihlaste se účtem s předplatným **Max**.
+   - **Codex CLI**: nainstalujte ho a spusťte `codex login`, přihlaste se účtem **ChatGPT**.
+
+   Přihlášení ověříte příkazy `claude auth status` (musí být `authMethod: claude.ai`)
+   a `codex login status` (musí být „Logged in using ChatGPT“). Chybí-li nástroj nebo přihlášení,
+   nástroj to česky řekne a skončí dřív, než cokoli odešle. Volání čerpají z limitu předplatného;
+   když se vyčerpá, běh se přeruší a po obnovení limitu ho dokončí `pokracovat.bat`.
 3. Dvakrát klikněte na `spustit.bat`. Poprvé si nástroj vytvoří prostředí `.venv` a nainstaluje
    knihovny (několik minut, potřebuje internet). Další spuštění už jsou rychlá.
 
-Chybí-li klíč, nástroj řekne který a skončí dřív, než cokoli odešle.
+**Klíče z `.env` se v režimu předplatného do nástrojů nikdy nepředávají** – proměnné s API klíči
+a přihlašovacími tokeny se podprocesům odstraní, aby se omylem neúčtovalo přes API.
+
+### Režim API (volitelný)
+
+Chcete-li místo předplatného platit přes API, nastavte v `nastaveni.yaml` `modely.rezim: api`
+a zkopírujte soubor `.env.example` jako `.env`. Doplňte do něj oba API klíče
+(`ANTHROPIC_API_KEY` a `OPENAI_API_KEY`; kde je získat, je napsáno přímo v souboru).
+Soubor `.env` nikomu neposílejte a neukládejte do gitu. Chybí-li klíč, nástroj řekne který
+a skončí dřív, než cokoli odešle. V tomto režimu platí oddíly `claude` a `gpt` v `nastaveni.yaml`
+a přehled uvádí odhad ceny v USD.
 
 ## Běžné použití
 
@@ -129,7 +149,8 @@ a k ověření, že je výsledek reálně použitelný.
 
 1. Vložte referenční nabídku (DOCX, MD nebo TXT) do složky `examples/` – **právě jeden soubor**.
    Generování nabídek složku `examples/` nikdy nečte; referenci uvidí jen hodnotitel (GPT)
-   při porovnání. Potřeba je jen klíč `OPENAI_API_KEY`.
+   při porovnání. Porovnání volá jen hodnotitele GPT (v režimu předplatného Codex, v režimu API
+   stačí klíč `OPENAI_API_KEY`).
 2. Dvakrát klikněte na **`porovnat.bat`** – porovná poslední dokončený běh v `output/`. Konkrétní
    běh porovnáte přetažením jeho složky na `porovnat.bat`. Jiná reference:
    `porovnat.bat SLOZKA_BEHU --reference cesta\k\nabidce.docx`.
