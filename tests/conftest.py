@@ -3,6 +3,12 @@ from pathlib import Path
 
 import pytest
 
+from refiner.modely import podproces
+
+
+def _zakaz_nastroj(*args, **kwargs):
+    raise RuntimeError("Test se pokusil spustit skutečný nástroj CLI")
+
 
 @pytest.fixture(autouse=True)
 def _bez_site(monkeypatch):
@@ -10,6 +16,7 @@ def _bez_site(monkeypatch):
         raise RuntimeError("Test se pokusil o síťové spojení")
 
     monkeypatch.setattr(socket.socket, "connect", _zakaz)
+    monkeypatch.setattr(podproces, "spust", _zakaz_nastroj)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
