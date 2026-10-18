@@ -364,3 +364,23 @@ def test_nenainstalovano_pri_spusteni():
     with pytest.raises(ChybaModelu) as e:
         volej_json(m)
     assert e.value.druh == "nenainstalovano"
+
+
+def test_argv_bez_nastaveni_ktere_codex_nezna():
+    """Ostrý test (codex-cli 0.163.0): `tools.view_image` hlásí jako 'unrecognized configuration setting'."""
+    m, s = model(odp_json())
+    volej_json(m)
+    assert not any(a.startswith("tools.") for a in s.volani[0].argv)
+
+
+def test_varovani_codexu_jako_item_error_neshodi_volani():
+    """Skutečný tvar výstupu z ostrého testu: varování o konfiguraci přijde jako item.completed typu error."""
+    varovani = {"type": "item.completed", "item": {
+        "id": "item_0", "type": "error",
+        "message": "Codex is ignoring 1 unrecognized configuration setting. Check for typos or deprecated settings."}}
+    stdout = udalosti({"type": "thread.started", "thread_id": "t"}, varovani, varovani, {"type": "turn.started"},
+                      {"type": "item.completed", "item": {"id": "item_2", "type": "agent_message", "text": "{}"}},
+                      {"type": "turn.completed", "usage": {**USAGE, "cache_write_input_tokens": 0}})
+    m, _ = model(odp_json(stdout=stdout))
+    assert volej_json(m) == VystupNalezitosti.model_validate(NALEZITOSTI)
+    assert m.vyzvedni_spotrebu()[0].vstup == 2000

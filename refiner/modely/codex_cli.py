@@ -118,7 +118,7 @@ class CodexModel:
                     "-s", "read-only", "-C", str(prace), "-m", c.model,
                     "-c", f"model_reasoning_effort={c.effort}", "-c", "model_reasoning_summary=none",
                     "-c", f"model_instructions_file={json.dumps(str(soubor_instrukce))}",
-                    "-c", "approval_policy=never", "-c", "web_search=disabled", "-c", "tools.view_image=false",
+                    "-c", "approval_policy=never", "-c", "web_search=disabled",
                     "-c", "features.shell_tool=false", "-c", "project_doc_max_bytes=0",
                     "-c", "include_permissions_instructions=false", "-c", "include_environment_context=false",
                     "-c", "skills.include_instructions=false"]
