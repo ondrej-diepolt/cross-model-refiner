@@ -227,3 +227,15 @@ def test_neznamy_rezim_selze(tmp_path):
     soubor = _nastaveni(tmp_path, {"modely:\n": "modely:\n  rezim: xyz\n"})
     with pytest.raises(ChybaKonfigurace, match="modely.rezim"):
         nacti_nastaveni(soubor)
+
+
+def test_effort_extrakce_predplatneho_se_projevi_v_oddilu_claude(tmp_path):
+    """kroky.py čte effort_extrakce z modely.claude; v režimu predplatne musí platit hodnota z predplatne."""
+    soubor = _nastaveni(tmp_path, {"modely:\n": "modely:\n  predplatne: {claude: {effort_extrakce: low}}\n"})
+    n = nacti_nastaveni(soubor)
+    assert n.modely.claude.effort_extrakce == "low"
+
+
+def test_effort_extrakce_api_rezimu_zustava(tmp_path):
+    soubor = _nastaveni(tmp_path, {"modely:\n": "modely:\n  rezim: api\n  predplatne: {claude: {effort_extrakce: low}}\n"})
+    assert nacti_nastaveni(soubor).modely.claude.effort_extrakce == "medium"

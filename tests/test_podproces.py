@@ -148,3 +148,21 @@ def test_docasne_adresare_prace_je_prazdna_a_zmizi():
 def test_conftest_blokuje_skutecny_nastroj():
     with pytest.raises(RuntimeError, match="skutečný nástroj"):
         podproces.spust(["claude"], "", {}, Path("."), 1)
+
+
+def test_timeout_zabije_osirele_potomky_drzici_stdout(tmp_path):
+    """Prostřední proces skončí hned, potomek drží stdout (taskkill /T už strom nenajde)."""
+    skript = _skript(tmp_path, "import subprocess, sys\n"
+                               "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(25)'])\n")
+    start = time.monotonic()
+    with pytest.raises(VyprselCas):
+        spust_proces([sys.executable, str(skript)], "", ciste_prostredi(), tmp_path, 2)
+    assert time.monotonic() - start < 12
+
+
+def test_timeout_plati_i_kdyz_potomek_necte_velky_stdin(tmp_path):
+    skript = _skript(tmp_path, "import time\ntime.sleep(25)\n")
+    start = time.monotonic()
+    with pytest.raises(VyprselCas):
+        spust_proces([sys.executable, str(skript)], "x" * 2_000_000, ciste_prostredi(), tmp_path, 1)
+    assert time.monotonic() - start < 12

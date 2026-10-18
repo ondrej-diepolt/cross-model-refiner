@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 TOLERANCE_SOUCTU = 1e-6
 
@@ -82,6 +82,14 @@ class NastaveniModelu(_Model):
     timeout_s: float
     rezim: Literal["predplatne", "api"] = "predplatne"
     predplatne: NastaveniPredplatneho = Field(default_factory=NastaveniPredplatneho)
+
+    @model_validator(mode="after")
+    def _effort_extrakce_podle_rezimu(self) -> "NastaveniModelu":
+        # kroky.py čte effort_extrakce z oddílu claude; v režimu predplatne platí hodnota z oddílu predplatne.
+        if self.rezim == "predplatne":
+            self.claude = self.claude.model_copy(
+                update={"effort_extrakce": self.predplatne.claude.effort_extrakce})
+        return self
 
 
 class NastaveniSmycky(_Model):

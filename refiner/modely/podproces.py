@@ -60,11 +60,75 @@ def ciste_prostredi(zdroj: Mapping[str, str] | None = None,
     return env
 
 
-def _zabij_strom(proc: subprocess.Popen) -> None:
+class _Job:
+    """Windows Job Object: zabije i potomky, jejichž rodič už skončil (taskkill /T je nenajde)."""
+
+    def __init__(self) -> None:
+        self._uchyt = None
+        if sys.platform != "win32":
+            return
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            k32.CreateJobObjectW.restype = wintypes.HANDLE
+            k32.CreateJobObjectW.argtypes = [wintypes.LPVOID, wintypes.LPCWSTR]
+            k32.SetInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD]
+            k32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+            k32.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
+            k32.CloseHandle.argtypes = [wintypes.HANDLE]
+
+            class _Zakladni(ctypes.Structure):
+                _fields_ = [("PerProcessUserTimeLimit", ctypes.c_int64), ("PerJobUserTimeLimit", ctypes.c_int64),
+                            ("LimitFlags", wintypes.DWORD), ("MinimumWorkingSetSize", ctypes.c_size_t),
+                            ("MaximumWorkingSetSize", ctypes.c_size_t), ("ActiveProcessLimit", wintypes.DWORD),
+                            ("Affinity", ctypes.c_size_t), ("PriorityClass", wintypes.DWORD),
+                            ("SchedulingClass", wintypes.DWORD)]
+
+            class _Io(ctypes.Structure):
+                _fields_ = [(n, ctypes.c_uint64) for n in (
+                    "ReadOperationCount", "WriteOperationCount", "OtherOperationCount",
+                    "ReadTransferCount", "WriteTransferCount", "OtherTransferCount")]
+
+            class _Rozsirene(ctypes.Structure):
+                _fields_ = [("BasicLimitInformation", _Zakladni), ("IoInfo", _Io),
+                            ("ProcessMemoryLimit", ctypes.c_size_t), ("JobMemoryLimit", ctypes.c_size_t),
+                            ("PeakProcessMemoryUsed", ctypes.c_size_t), ("PeakJobMemoryUsed", ctypes.c_size_t)]
+
+            uchyt = k32.CreateJobObjectW(None, None)
+            if not uchyt:
+                return
+            info = _Rozsirene()
+            info.BasicLimitInformation.LimitFlags = 0x2000   # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+            if not k32.SetInformationJobObject(uchyt, 9, ctypes.byref(info), ctypes.sizeof(info)):
+                k32.CloseHandle(uchyt)
+                return
+            self._k32, self._uchyt = k32, uchyt
+        except (OSError, AttributeError, ImportError):
+            self._uchyt = None
+
+    def pridej(self, proc: subprocess.Popen) -> None:
+        if self._uchyt is not None:
+            self._k32.AssignProcessToJobObject(self._uchyt, int(proc._handle))  # type: ignore[attr-defined]
+
+    def zabij(self) -> None:
+        if self._uchyt is not None:
+            self._k32.TerminateJobObject(self._uchyt, 1)
+
+    def zavri(self) -> None:
+        """Zavření uchytu zabije případné zbylé potomky (KILL_ON_JOB_CLOSE)."""
+        if self._uchyt is not None:
+            self._k32.CloseHandle(self._uchyt)
+            self._uchyt = None
+
+
+def _zabij_strom(proc: subprocess.Popen, job: _Job) -> None:
     if sys.platform == "win32":
+        job.zabij()
         try:
             subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)],
-                           capture_output=True, timeout=_KONEC_STROMU_S, check=False)
+                           capture_output=True, timeout=_KONEC_STROMU_S, check=False, env=ciste_prostredi())
         except (OSError, subprocess.SubprocessError):
             pass
         proc.kill()
@@ -78,22 +142,31 @@ def _zabij_strom(proc: subprocess.Popen) -> None:
 
 def spust_proces(argv: list[str], stdin: str, env: dict[str, str], cwd: Path,
                  timeout_s: float) -> Vysledek:
-    """Spustí program, prompt pošle přes stdin (UTF-8); po vypršení limitu zabije celý strom."""
-    proc = subprocess.Popen(
-        argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        cwd=cwd, env=env, start_new_session=(sys.platform != "win32"))
-    try:
-        out, err = proc.communicate(stdin.encode("utf-8"), timeout=timeout_s)
-    except subprocess.TimeoutExpired:
-        _zabij_strom(proc)
+    """Spustí program, prompt pošle přes stdin (UTF-8); po vypršení limitu zabije celý strom.
+
+    Stdin jde ze souboru, ne z roury: zápis do roury by u procesu, který stdin nečte, blokoval
+    mimo časový limit. Rodiče i potomky hlídá na Windows Job Object.
+    """
+    job = _Job()
+    with tempfile.TemporaryFile() as vstup:
+        vstup.write(stdin.encode("utf-8"))
+        vstup.seek(0)
+        proc = subprocess.Popen(
+            argv, stdin=vstup, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            cwd=cwd, env=env, start_new_session=(sys.platform != "win32"))
         try:
-            proc.communicate(timeout=_KONEC_STROMU_S)
-        except subprocess.TimeoutExpired:
-            # Potomek mimo strom drží roury; nečekáme na ně dál.
-            for roura in (proc.stdin, proc.stdout, proc.stderr):
-                if roura:
-                    roura.close()
-        raise VyprselCas() from None
+            job.pridej(proc)
+            try:
+                out, err = proc.communicate(timeout=timeout_s)
+            except subprocess.TimeoutExpired:
+                _zabij_strom(proc, job)
+                try:
+                    proc.communicate(timeout=_KONEC_STROMU_S)
+                except subprocess.TimeoutExpired:
+                    pass   # čtecí vlákna jsou daemon; roury nezavíráme (close() by čekal na ně)
+                raise VyprselCas() from None
+        finally:
+            job.zavri()
     return Vysledek(proc.returncode, out.decode("utf-8", errors="replace"),
                     err.decode("utf-8", errors="replace"))
 
