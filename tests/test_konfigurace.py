@@ -7,6 +7,7 @@ from refiner.konfigurace import (
     cesta_kriterii_k_poptavce,
     dostupne_profily,
     nacti_konfiguraci,
+    nacti_nastaveni,
 )
 
 NASTAVENI = """\
@@ -200,3 +201,29 @@ def test_cesta_kriterii_k_poptavce(tmp_path):
 
 def test_dostupne_profily(koren_repa):
     assert dostupne_profily(koren_repa / "profily") == ["nabidka", "smernice"]
+
+
+def test_vychozi_rezim_je_predplatne(koren_repa):
+    n = nacti_nastaveni(koren_repa / "nastaveni.yaml")
+    assert n.modely.rezim == "predplatne"
+    assert n.modely.predplatne.claude.model == "claude-opus-5-5"
+    assert n.modely.predplatne.codex.model == "gpt-6-astra"
+    assert n.modely.predplatne.claude.prikaz is None
+
+
+def test_stara_kopie_bez_rezimu_se_nacte(tmp_path):
+    n = nacti_nastaveni(_nastaveni(tmp_path))
+    assert n.modely.rezim == "predplatne" and n.modely.predplatne.codex.effort == "high"
+
+
+@pytest.mark.parametrize("effort", ["ultra", "none", "minimal"])
+def test_codex_effort_mimo_povolene_selze(tmp_path, effort):
+    soubor = _nastaveni(tmp_path, {"modely:\n": f"modely:\n  predplatne: {{codex: {{effort: {effort}}}}}\n"})
+    with pytest.raises(ChybaKonfigurace, match="modely.predplatne.codex.effort"):
+        nacti_nastaveni(soubor)
+
+
+def test_neznamy_rezim_selze(tmp_path):
+    soubor = _nastaveni(tmp_path, {"modely:\n": "modely:\n  rezim: xyz\n"})
+    with pytest.raises(ChybaKonfigurace, match="modely.rezim"):
+        nacti_nastaveni(soubor)

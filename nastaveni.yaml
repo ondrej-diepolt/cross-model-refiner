@@ -1,5 +1,14 @@
 # Nastavení nástroje (modely, smyčka, váhy skupin kritérií, ceny).
 modely:
+  # predplatne = Claude Code (předplatné Max) a Codex CLI (předplatné ChatGPT), bez API klíčů;
+  # api = placené API s klíči v .env (oddíly claude a gpt níže).
+  rezim: predplatne
+  # Modely a effort pro režim predplatne. Volitelné "prikaz" (cesta k programu claude, resp. codex,
+  # když není v PATH) se zadává u claude nebo codex, např. codex: {prikaz: "C:/nastroje/codex.exe"}.
+  predplatne:
+    claude: {model: claude-opus-5-5, effort: high, effort_extrakce: medium}
+    codex: {model: gpt-6-astra, effort: high}
+  # Oddíly claude a gpt níže platí jen pro rezim: api.
   # Claude píše a zapracovává text; effort řídí hloubku uvažování
   # (low, medium, high, xhigh, max). Do max_tokens_* se počítá i uvažování modelu,
   # proto jsou limity vysoké; při hlášce o uříznuté odpovědi je zvyšte.
@@ -8,7 +17,7 @@ modely:
   # GPT je nezávislý hodnotitel. Do max_output_tokens se počítají i tokeny uvažování
   # (reasoning), proto je limit vysoký; při hlášce o uříznuté odpovědi ho zvyšte.
   gpt: {model: gpt-6-astra, effort: high, max_output_tokens: 64000}
-  max_retries: 4      # počet opakování při dočasné chybě API
+  max_retries: 4      # počet opakování při dočasné chybě API (jen API; CLI opakují dočasné chyby samy)
   # Časový limit jednoho volání v sekundách. Hodnocení s vysokým effortem trvá i desítky
   # minut, proto je limit dlouhý.
   timeout_s: 1800

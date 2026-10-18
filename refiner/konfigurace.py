@@ -54,11 +54,34 @@ class NastaveniGpt(_Model):
     max_output_tokens: int
 
 
+EffortCodex = Literal["low", "medium", "high", "xhigh", "max"]
+
+
+class NastaveniClaudeCli(_Model):
+    model: str = "claude-opus-5-5"
+    effort: EffortClaude = "high"
+    effort_extrakce: EffortClaude = "medium"
+    prikaz: str | None = None
+
+
+class NastaveniCodex(_Model):
+    model: str = "gpt-6-astra"
+    effort: EffortCodex = "high"
+    prikaz: str | None = None
+
+
+class NastaveniPredplatneho(_Model):
+    claude: NastaveniClaudeCli = Field(default_factory=NastaveniClaudeCli)
+    codex: NastaveniCodex = Field(default_factory=NastaveniCodex)
+
+
 class NastaveniModelu(_Model):
     claude: NastaveniClaude
     gpt: NastaveniGpt
     max_retries: int
     timeout_s: float
+    rezim: Literal["predplatne", "api"] = "predplatne"
+    predplatne: NastaveniPredplatneho = Field(default_factory=NastaveniPredplatneho)
 
 
 class NastaveniSmycky(_Model):
