@@ -124,10 +124,11 @@ def _je_openai(model: str) -> bool:
 def _cena(spotreba: list[Spotreba], konf: Konfigurace) -> dict:
     """Souhrn po modelech; `vstup` v řádcích je vždy vstup bez tokenů z cache (u obou služeb)."""
     ceny = konf.nastaveni.ceny_usd_za_milion
-    souhrn: dict[str, dict] = {}
+    souhrn: dict[tuple[str, bool], dict] = {}
     for s in spotreba:
-        r = souhrn.setdefault(s.model, {"model": s.model, "vstup": 0, "vystup": 0,
-                                        "cache_cteni": 0, "cache_zapis": 0})
+        r = souhrn.setdefault((s.model, s.predplatne), {
+            "model": s.model, "predplatne": s.predplatne, "vstup": 0, "vystup": 0,
+            "cache_cteni": 0, "cache_zapis": 0})
         # OpenAI počítá tokeny z cache do vstupu; Anthropic ne.
         r["vstup"] += s.vstup - s.cache_cteni if _je_openai(s.model) else s.vstup
         r["vystup"] += s.vystup
@@ -138,7 +139,9 @@ def _cena(spotreba: list[Spotreba], konf: Konfigurace) -> dict:
     radky = []
     for r in souhrn.values():
         c = ceny.get(r["model"])
-        if c is None:
+        if r["predplatne"]:
+            cena_txt = "v předplatném"
+        elif c is None:
             neznama = True
             cena_txt = "cena neznámá"
         else:
@@ -153,6 +156,8 @@ def _cena(spotreba: list[Spotreba], konf: Konfigurace) -> dict:
         radky.append({**r, "cena": cena_txt})
     return {
         "radky": radky, "celkem": _desetinne(celkem), "neznama": neznama,
+        "predplatne": any(r["predplatne"] for r in radky),
+        "jen_predplatne": bool(radky) and all(r["predplatne"] for r in radky),
         **{k: sum(r[k] for r in radky) for k in ("vstup", "vystup", "cache_cteni", "cache_zapis")},
     }
 

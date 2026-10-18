@@ -95,7 +95,8 @@ class Spotreba(BaseModel):
     """Spotřeba tokenů jednoho volání (neposílá se modelu, výchozí hodnoty jsou v pořádku).
 
     Anthropic: `vstup` nezahrnuje čtení ani zápis cache. OpenAI: `cache_cteni` je podmnožina
-    `vstup`, `cache_zapis` je vždy 0.
+    `vstup`, `cache_zapis` je vždy 0. `predplatne`: True = volání přes předplatné (CLI),
+    cena se neuvádí.
     """
 
     krok: str
@@ -104,3 +105,4 @@ class Spotreba(BaseModel):
     vystup: int
     cache_cteni: int = 0
     cache_zapis: int = 0
+    predplatne: bool = False

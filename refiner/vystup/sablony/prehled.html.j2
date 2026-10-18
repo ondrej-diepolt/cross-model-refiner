@@ -95,11 +95,13 @@ ul { margin: 0.3rem 0; }
 <tr><th>Model</th><th>Vstupní tokeny</th><th>Cache – čtení / zápis</th><th>Výstupní tokeny</th><th>Cena (orientačně, cache odhadem)</th></tr>
 {% for r in cena.radky %}<tr><td>{{ r.model }}</td><td>{{ r.vstup }}</td><td>{{ r.cache_cteni }} / {{ r.cache_zapis }}</td><td>{{ r.vystup }}</td><td>{{ r.cena }}</td></tr>
 {% endfor %}
-<tr class="celkem"><td>Celkem</td><td>{{ cena.vstup }}</td><td>{{ cena.cache_cteni }} / {{ cena.cache_zapis }}</td><td>{{ cena.vystup }}</td><td>{{ cena.celkem }} USD{% if cena.neznama %} + cena neznámá u některých modelů{% endif %}</td></tr>
+<tr class="celkem"><td>Celkem</td><td>{{ cena.vstup }}</td><td>{{ cena.cache_cteni }} / {{ cena.cache_zapis }}</td><td>{{ cena.vystup }}</td><td>{% if cena.jen_predplatne %}v předplatném{% else %}{{ cena.celkem }} USD{% if cena.neznama %} + cena neznámá u některých modelů{% endif %}{% if cena.predplatne %} + část v předplatném{% endif %}{% endif %}</td></tr>
 </table>
 <p class="meta">Cena je pouze orientační: počítá se z tokenů a cen v nastavení. Sleva za čtení z cache
 a příplatek za zápis do cache jsou odhadnuté (Claude: zápis 1,25×, čtení 0,1× ceny vstupu;
 GPT: čtení 0,5× ceny vstupu). Vstupní tokeny jsou bez tokenů z cache.</p>
+{% if cena.predplatne %}<p class="meta">Volání v předplatném (Claude Code, Codex) se neúčtují po tokenech, jejich cena se proto neuvádí.</p>
+{% endif %}
 {% else %}<p>Zatím nebyl spotřebován žádný token.</p>{% endif %}
 <p>Doba běhu: {{ doba }}</p>
 </body>

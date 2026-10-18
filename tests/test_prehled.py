@@ -158,3 +158,59 @@ def test_prehled_stats_navrhu_a_dalsi_kola(tmp_path, zdroje):
     spust_smycku(beh, zdroje, *skript([7.0] * 4, rozhodnuti="castecne"), hlaseni=_ticho)
     beh.ukonci("dokoncen", "limit_revizi", finalni_verze=2)
     assert "Částečně" in _html(beh, zdroje)
+
+
+def test_cena_predplatne_se_nepocita(zdroje):
+    from refiner.vystup.prehled import _cena, _desetinne
+
+    cena = _cena([Spotreba(krok="navrh", model="claude-opus-5-5", vstup=1000, vystup=500, predplatne=True),
+                  Spotreba(krok="hodnoceni_1", model="gpt-6-astra", vstup=1000, vystup=500, predplatne=True)],
+                 zdroje.konfigurace)
+    assert [r["cena"] for r in cena["radky"]] == ["v předplatném", "v předplatném"]
+    assert cena["jen_predplatne"] and cena["predplatne"] and not cena["neznama"]
+    assert cena["celkem"] == _desetinne(0.0)
+
+
+def test_cena_smiseny_beh_rozdeli_radky(zdroje):
+    from refiner.vystup.prehled import _cena
+
+    cena = _cena([Spotreba(krok="a", model="claude-opus-5-5", vstup=1_000_000, vystup=0),
+                  Spotreba(krok="b", model="claude-opus-5-5", vstup=1000, vystup=500, predplatne=True)],
+                 zdroje.konfigurace)
+    assert len(cena["radky"]) == 2 and cena["predplatne"] and not cena["jen_predplatne"]
+    assert [r["cena"] for r in cena["radky"]] == ["4,00 USD", "v předplatném"]
+    assert cena["celkem"] == "4,00"
+
+
+def test_cena_jen_api_nema_priznaky_predplatneho(zdroje):
+    from refiner.vystup.prehled import _cena
+
+    cena = _cena([Spotreba(krok="a", model="claude-opus-5-5", vstup=10, vystup=5)], zdroje.konfigurace)
+    assert not cena["predplatne"] and not cena["jen_predplatne"]
+    assert not _cena([], zdroje.konfigurace)["jen_predplatne"]
+
+
+def test_stara_spotreba_bez_pole_je_api():
+    assert Spotreba.model_validate({"krok": "x", "model": "m", "vstup": 1, "vystup": 1}).predplatne is False
+
+
+def test_prehled_celkem_v_predplatnem(tmp_path, zdroje):
+    beh = beh_test(tmp_path, zdroje)
+    beh.pridej_spotrebu([Spotreba(krok="a", model="claude-opus-5-5", vstup=10, vystup=5, predplatne=True)])
+    html = _html(beh, zdroje)
+    assert "v předplatném" in html and "0,00 USD" not in html
+    assert "se neúčtují po tokenech" in html
+
+
+def test_prehled_celkem_smiseny(tmp_path, zdroje):
+    beh = beh_test(tmp_path, zdroje)
+    beh.pridej_spotrebu([Spotreba(krok="a", model="claude-opus-5-5", vstup=1_000_000, vystup=0),
+                         Spotreba(krok="b", model="gpt-6-astra", vstup=10, vystup=5, predplatne=True)])
+    html = _html(beh, zdroje)
+    assert "4,00 USD + část v předplatném" in html
+
+
+def test_prehled_jen_api_bez_poznamky_o_predplatnem(tmp_path, zdroje):
+    beh = beh_test(tmp_path, zdroje)
+    beh.pridej_spotrebu([Spotreba(krok="a", model="claude-opus-5-5", vstup=10, vystup=5)])
+    assert "předplatném" not in _html(beh, zdroje)
