@@ -2,7 +2,7 @@ from typing import Protocol, TypeVar
 
 from pydantic import BaseModel
 
-from refiner.data import Spotreba as TokenUsage
+from refiner.data import TokenUsage
 
 T = TypeVar("T", bound=BaseModel)
 

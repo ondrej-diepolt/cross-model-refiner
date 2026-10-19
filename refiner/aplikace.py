@@ -13,9 +13,9 @@ from pydantic import ValidationError
 
 from refiner.artifacts import (
     CONFIGURATION_DIRECTORY, LOG_FILE, MATERIALS_FILE, STATE_FILE, PROMPT_SNAPSHOT_NAMES,
-    canonical_profile_id, output_profile_name,
+    canonical_profile_id,
 )
-from refiner.beh import Beh
+from refiner.run import Run
 from refiner.configuration import (
     ConfigurationError,
     Configuration,
@@ -23,11 +23,11 @@ from refiner.configuration import (
     load_configuration,
     load_settings,
 )
-from refiner.kroky import Zdroje
+from refiner.steps import Sources
 from refiner.models.errors import ModelError
 from refiner.models.interface import Model
 from refiner.porovnani import porovnej
-from refiner.smycka import spust_smycku
+from refiner.loop import run_loop
 from refiner.input import InputError, read_as_markdown, read_materials, resolve_materials_directory
 from refiner.vystup.docx import exportuj_docx
 from refiner.vystup.prehled import vytvor_prehled
@@ -43,7 +43,7 @@ HLASKA_POROVNAT_ZNOVU = "Stav běhu se nezměnil; porovnání zopakujete spušt�
 # ---------------------------------------------------------------- zahájení a obnovení
 
 def _modely_z_repozitare(
-    beh: Beh,
+    beh: Run,
     konfigurace: Configuration,
     koren: Path,
     hlaseni: Callable[[str], None] | None,
@@ -72,14 +72,14 @@ def _modely_z_repozitare(
     return replace(konfigurace, settings=nastaveni)
 
 
-def _nacti_zdroje(beh: Beh, koren: Path | None = None,
-                  hlaseni: Callable[[str], None] | None = None) -> Zdroje:
+def _nacti_zdroje(beh: Run, koren: Path | None = None,
+                  hlaseni: Callable[[str], None] | None = None) -> Sources:
     """Zdroje z kopií ve složce běhu (konfigurace, prompty, poptávka, podklady).
 
     Je-li zadán `koren`, oddíly `modely` a `ceny_usd_za_milion` se vezmou z aktuálního
     koren/settings.yaml (viz _modely_z_repozitare).
     """
-    konf_slozka = beh.slozka / CONFIGURATION_DIRECTORY
+    konf_slozka = beh.directory / CONFIGURATION_DIRECTORY
     kriteria = konf_slozka / "kriteria.yaml"
     konfigurace = load_configuration(
         konf_slozka / "nastaveni.yaml",
@@ -87,21 +87,21 @@ def _nacti_zdroje(beh: Beh, koren: Path | None = None,
         kriteria if kriteria.exists() else None,
     )
     # Kopie profilu se jmenuje profil.yaml; název profilu (pro FINALNI_<profil>) je ve stavu běhu.
-    konfigurace = replace(konfigurace, profile_id=canonical_profile_id(beh.stav.profil),
-                         output_profile_name=beh.stav.profil)
+    konfigurace = replace(konfigurace, profile_id=beh.state.profile_id,
+                         output_profile_name=beh.state.output_profile_name)
     if koren is not None:
         konfigurace = _modely_z_repozitare(beh, konfigurace, koren, hlaseni)
-    podklady = beh.slozka / MATERIALS_FILE
-    return Zdroje(
-        poptavka=beh.text("poptavka"),
-        podklady=podklady.read_text(encoding="utf-8") if podklady.exists() else "",
-        konfigurace=konfigurace,
-        prompty=konf_slozka / "prompty",
+    podklady = beh.directory / MATERIALS_FILE
+    return Sources(
+        request=beh.text('request'),
+        materials=podklady.read_text(encoding="utf-8") if podklady.exists() else "",
+        configuration=konfigurace,
+        prompts=konf_slozka / "prompty",
     )
 
 
 def zahaj_beh(koren: Path, vstup: Path, profil: str, ted: datetime,
-              nanecisto: bool = False) -> tuple[Beh, Zdroje]:
+              nanecisto: bool = False) -> tuple[Run, Sources]:
     """Založí běh v koren/output: kopie konfigurace a promptů, krok poptavka a data/podklady.md.
 
     `nanecisto` se uloží do stavu běhu (ukázkový běh s falešnými modely).
@@ -115,29 +115,29 @@ def zahaj_beh(koren: Path, vstup: Path, profil: str, ted: datetime,
     poptavka = read_as_markdown(vstup)
     podklady = read_materials(resolve_materials_directory(koren))
 
-    beh = Beh.novy(koren / "output", vstup.name, output_profile_name(profil), ted, nanecisto=nanecisto)
-    konf_slozka = beh.slozka / CONFIGURATION_DIRECTORY
+    beh = Run.new(koren / "output", vstup.name, profil, ted, dry_run=nanecisto)
+    konf_slozka = beh.directory / CONFIGURATION_DIRECTORY
     konf_slozka.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(nastaveni, konf_slozka / "nastaveni.yaml")
     shutil.copyfile(soubor_profilu, konf_slozka / "profil.yaml")
     (konf_slozka / "prompty").mkdir()
     for name, snapshot_name in PROMPT_SNAPSHOT_NAMES.items():
-        source = koren / "prompty" / f"{name}.md"
+        source = koren / 'prompts' / f"{name}.md"
         if not source.is_file():
-            source = koren / "prompty" / snapshot_name
+            source = koren / 'prompts' / snapshot_name
         shutil.copyfile(source, konf_slozka / "prompty" / snapshot_name)
     if kriteria is not None:
         shutil.copyfile(kriteria, konf_slozka / "kriteria.yaml")
-    beh.zapis_pevny(MATERIALS_FILE, podklady)
-    beh.zapis("poptavka", "poptavka.md", poptavka)
+    beh.write_fixed(MATERIALS_FILE, podklady)
+    beh.write('request', "poptavka.md", poptavka)
     return beh, _nacti_zdroje(beh)
 
 
-def _otevri(slozka: Path) -> Beh:
+def _otevri(slozka: Path) -> Run:
     if not (slozka / STATE_FILE).is_file():
         raise InputError(f"Složka {slozka} není složka běhu (chybí {STATE_FILE}).")
     try:
-        return Beh.otevri(slozka)
+        return Run.open(slozka)
     except (OSError, ValidationError) as e:
         raise InputError(f"Stav běhu ve složce {slozka} nelze přečíst ({STATE_FILE}).") from e
 
@@ -147,19 +147,19 @@ def obnov_beh(
     koren: Path | None = None,
     nanecisto: bool | None = None,
     hlaseni: Callable[[str], None] | None = None,
-) -> tuple[Beh, Zdroje]:
+) -> tuple[Run, Sources]:
     """Otevře přerušený běh; konfiguraci, prompty i vstupy bere z kopií ve složce běhu.
 
     Se zadaným `koren` bere oddíly `modely` a `ceny_usd_za_milion` z aktuálního
     koren/settings.yaml. Se zadaným `nanecisto` odmítne běh jiného režimu (ukázkový/ostrý).
     """
     beh = _otevri(slozka)
-    if beh.stav.stav == "dokoncen":
+    if beh.state.status == 'completed':
         raise InputError(f"Běh {slozka.name} je už dokončený.")
-    if not beh.hotovo("poptavka"):
+    if not beh.is_done('request'):
         raise InputError(f"Běh {slozka.name} nelze obnovit: chybí uložená poptávka.")
-    if nanecisto is not None and beh.stav.nanecisto != nanecisto:
-        if beh.stav.nanecisto:
+    if nanecisto is not None and beh.state.dry_run != nanecisto:
+        if beh.state.dry_run:
             raise InputError(f"Běh {slozka.name} je ukázkový (--nanecisto, falešné modely); "
                               "pokračovat v něm lze jen s volbou --nanecisto.")
         raise InputError(f"Běh {slozka.name} je ostrý běh se skutečnými modely; s volbou --nanecisto "
@@ -172,30 +172,30 @@ def otevri_dokonceny(
     koren: Path | None = None,
     nanecisto: bool | None = None,
     hlaseni: Callable[[str], None] | None = None,
-) -> tuple[Beh, Zdroje]:
+) -> tuple[Run, Sources]:
     """Otevře dokončený běh k porovnání; zdroje bere z kopií ve složce běhu.
 
     `koren` a `nanecisto` jako u obnov_beh (porovnání volá skutečný GPT, ukázkový běh odmítne).
     """
     beh = _otevri(slozka)
-    if beh.stav.stav != "dokoncen":
+    if beh.state.status != 'completed':
         raise InputError(f"Běh {slozka.name} není dokončený; porovnat lze jen dokončený běh.")
-    if nanecisto is not None and beh.stav.nanecisto != nanecisto:
-        if beh.stav.nanecisto:
+    if nanecisto is not None and beh.state.dry_run != nanecisto:
+        if beh.state.dry_run:
             raise InputError(f"Běh {slozka.name} je ukázkový (--nanecisto) s falešnými texty; "
                               "s referencí ho porovnat nelze.")
         raise InputError(f"Běh {slozka.name} je ostrý běh; v ukázkovém režimu ho porovnat nelze.")
     return beh, _nacti_zdroje(beh, koren, hlaseni)
 
 
-def obnov_prompty_porovnani(beh: Beh, prompty: Path) -> None:
+def obnov_prompty_porovnani(beh: Run, prompty: Path) -> None:
     """Zkopíruje aktuální prompty porovnání z `prompty` do kopie konfigurace běhu.
 
     Porovnání je nástroj ladění: má používat aktuální prompty porovnání (i u běhů založených
     dřív, než prompty existovaly), a kopie ve složce běhu pak ukazuje, s čím se porovnávalo.
     Ostatní prompty (hodnoceni.md pro kalibraci) zůstávají z běhu.
     """
-    cil = beh.slozka / CONFIGURATION_DIRECTORY / "prompty"
+    cil = beh.directory / CONFIGURATION_DIRECTORY / "prompty"
     for name, snapshot_name in PROMPT_SNAPSHOT_NAMES.items():
         if not name.startswith("comparison_"):
             continue
@@ -219,19 +219,19 @@ def najdi_posledni_beh(output: Path, stavy: set[str], nanecisto: bool | None = N
         if not (slozka / STATE_FILE).is_file():
             continue
         try:
-            stav = Beh.otevri(slozka).stav
+            stav = Run.open(slozka).state
         except (OSError, ValidationError):
             continue
-        if stav.stav in stavy and (nanecisto is None or stav.nanecisto == nanecisto):
-            nalezene.append((stav.vytvoreno, slozka.name, slozka))
+        if stav.status in stavy and (nanecisto is None or stav.dry_run == nanecisto):
+            nalezene.append((stav.created_at, slozka.name, slozka))
     return max(nalezene)[2] if nalezene else None
 
 
 # ---------------------------------------------------------------- dokončení
 
 def _preruseni(
-    beh: Beh,
-    zdroje: Zdroje,
+    beh: Run,
+    sources: Sources,
     pisatel: Model,
     hodnotitel: Model,
     hlaseni: Callable[[str], None],
@@ -242,61 +242,61 @@ def _preruseni(
         # Spotřeba volání, která vrátila odpověď, ale krok pak neprošel kontrolou.
         zbytek = pisatel.take_usage() + hodnotitel.take_usage()
         if zbytek:
-            beh.pridej_spotrebu(zbytek)
+            beh.add_usage(zbytek)
     except Exception:
         _log.exception("Spotřebu přerušeného kroku se nepodařilo uložit.")
-    beh.ukonci("prerusen", chyba=chyba)
+    beh.finish('interrupted', error=chyba)
     try:
-        vytvor_prehled(beh, zdroje.konfigurace)
+        vytvor_prehled(beh, sources.configuration)
     except Exception:
         _log.exception("Přehled přerušeného běhu se nepodařilo vytvořit.")
     hlaseni(chyba)
-    hlaseni(f"Rozpracovaný běh je uložen ve složce: {beh.slozka}")
+    hlaseni(f"Rozpracovaný běh je uložen ve složce: {beh.directory}")
     hlaseni(HLASKA_POKRACOVAT)
     return 1
 
 
 def _dokonci(
-    beh: Beh,
-    zdroje: Zdroje,
+    beh: Run,
+    sources: Sources,
     pisatel: Model,
     hodnotitel: Model,
     hlaseni: Callable[[str], None],
     sablona: Path | None,
 ) -> int:
     try:
-        vysledek = spust_smycku(beh, zdroje, pisatel, hodnotitel, hlaseni)
-        finalni = beh.text(f"navrh_{vysledek.finalni_verze}")
-        nazev = zdroje.konfigurace.output_profile_name
-        beh.zapis_pevny(f"FINALNI_{nazev}.md", finalni)
+        vysledek = run_loop(beh, sources, pisatel, hodnotitel, hlaseni)
+        finalni = beh.text(f"draft_{vysledek.final_version}")
+        nazev = sources.configuration.output_profile_name
+        beh.write_fixed(f"FINALNI_{nazev}.md", finalni)
         try:
-            exportuj_docx(finalni, beh.slozka / f"FINALNI_{nazev}.docx", sablona)
+            exportuj_docx(finalni, beh.directory / f"FINALNI_{nazev}.docx", sablona)
         except Exception as e:
             _log.exception("Export do DOCX selhal.")
-            beh.pridej_varovani(
+            beh.add_warning(
                 f"Export do DOCX se nepodařil ({e}); finální text je v souboru FINALNI_{nazev}.md."
             )
-        beh.ukonci("dokoncen", vysledek.duvod, finalni_verze=vysledek.finalni_verze)
-        prehled = vytvor_prehled(beh, zdroje.konfigurace)
-        _log.info("Běh dokončen (%s, finální verze %d).", vysledek.duvod, vysledek.finalni_verze)
+        beh.finish('completed', vysledek.reason, final_version=vysledek.final_version)
+        prehled = vytvor_prehled(beh, sources.configuration)
+        _log.info("Běh dokončen (%s, finální verze %d).", vysledek.reason, vysledek.final_version)
         hlaseni(f"Hotovo. Přehled běhu: {prehled}")
         return 0
     except ModelError as e:
         _log.exception("Chyba modelu: %s", e.message)
         if e.raw_response is not None:
-            beh.zapis_pevny(f"data/surova_odpoved_{datetime.now():%Y%m%d_%H%M%S}.txt", e.raw_response)
-        return _preruseni(beh, zdroje, pisatel, hodnotitel, hlaseni, e.message)
+            beh.write_fixed(f"data/surova_odpoved_{datetime.now():%Y%m%d_%H%M%S}.txt", e.raw_response)
+        return _preruseni(beh, sources, pisatel, hodnotitel, hlaseni, e.message)
     except KeyboardInterrupt:
         _log.exception(HLASKA_CTRL_C)
-        return _preruseni(beh, zdroje, pisatel, hodnotitel, hlaseni, HLASKA_CTRL_C)
+        return _preruseni(beh, sources, pisatel, hodnotitel, hlaseni, HLASKA_CTRL_C)
     except Exception:
         _log.exception("Neočekávaná chyba programu.")
-        return _preruseni(beh, zdroje, pisatel, hodnotitel, hlaseni, HLASKA_NEOCEKAVANA)
+        return _preruseni(beh, sources, pisatel, hodnotitel, hlaseni, HLASKA_NEOCEKAVANA)
 
 
 def dokonci(
-    beh: Beh,
-    zdroje: Zdroje,
+    beh: Run,
+    sources: Sources,
     pisatel: Model,
     hodnotitel: Model,
     hlaseni: Callable[[str], None],
@@ -308,15 +308,15 @@ def dokonci(
     """
     with _log_behu(beh):
         _log.info("Běh %s: start (stav %s, hotové kroky: %s).",
-                  beh.slozka.name, beh.stav.stav, ", ".join(beh.stav.kroky) or "žádné")
-        return _dokonci(beh, zdroje, pisatel, hodnotitel, hlaseni, sablona)
+                  beh.directory.name, beh.state.status, ", ".join(beh.state.steps) or "žádné")
+        return _dokonci(beh, sources, pisatel, hodnotitel, hlaseni, sablona)
 
 
 @contextmanager
-def _log_behu(beh: Beh) -> Iterator[None]:
+def _log_behu(beh: Run) -> Iterator[None]:
     """Připojí na logger `refiner` soubor data/beh.log (připisuje se na konec)."""
     logger = logging.getLogger("refiner")
-    handler = logging.FileHandler(beh.slozka / LOG_FILE, encoding="utf-8")
+    handler = logging.FileHandler(beh.directory / LOG_FILE, encoding="utf-8")
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
     puvodni_uroven = logger.level
     logger.addHandler(handler)
@@ -333,8 +333,8 @@ def _log_behu(beh: Beh) -> Iterator[None]:
 # ---------------------------------------------------------------- porovnání s referencí
 
 def porovnej_beh(
-    beh: Beh,
-    zdroje: Zdroje,
+    beh: Run,
+    sources: Sources,
     reference_md: str,
     hodnotitel: Model,
     hlaseni: Callable[[str], None],
@@ -345,14 +345,14 @@ def porovnej_beh(
     with _log_behu(beh):
         _log.info("Porovnání s referencí %s: start.", nazev_reference or "(bez názvu)")
         try:
-            html = porovnej(beh, zdroje, reference_md, hodnotitel, hlaseni, nazev_reference=nazev_reference)
+            html = porovnej(beh, sources, reference_md, hodnotitel, hlaseni, nazev_reference=nazev_reference)
         except ConfigurationError as e:
             hlaseni(str(e))
             return 2
         except ModelError as e:
             _log.exception("Chyba modelu při porovnání: %s", e.message)
             if e.raw_response is not None:
-                beh.zapis_pevny(f"data/surova_odpoved_porovnani_{datetime.now():%Y%m%d_%H%M%S}.txt",
+                beh.write_fixed(f"data/surova_odpoved_porovnani_{datetime.now():%Y%m%d_%H%M%S}.txt",
                                 e.raw_response)
             # Hlášky chyb radí pokracovat.bat; dokončený běh se ale porovnává znovu přes porovnat.bat.
             hlaseni(e.message.replace("pokracovat.bat", "porovnat.bat"))

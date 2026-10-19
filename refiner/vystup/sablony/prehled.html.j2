@@ -2,7 +2,7 @@
 <html lang="cs">
 <head>
 <meta charset="utf-8">
-<title>Přehled běhu – {{ stav.vstup }}</title>
+<title>Přehled běhu – {{ stav.input }}</title>
 <style>
 body { font-family: Segoe UI, Arial, sans-serif; margin: 2rem auto; max-width: 70rem; padding: 0 1rem; color: #222; }
 h1 { margin-bottom: 0.2rem; } h2 { margin-top: 2rem; border-bottom: 1px solid #ccc; padding-bottom: 0.2rem; }
@@ -21,16 +21,16 @@ ul { margin: 0.3rem 0; }
 </head>
 <body>
 <h1>Přehled běhu</h1>
-<p class="meta">Vstup: {{ stav.vstup }} · profil: {{ profil }} · spuštěno {{ vytvoreno }}</p>
+<p class="meta">Vstup: {{ stav.input }} · profil: {{ profil }} · spuštěno {{ vytvoreno }}</p>
 
 <h2>1. Výsledek</h2>
-{% if stav.stav == "prerusen" %}
+{% if stav.status == "interrupted" %}
 <div class="blok chyba">
 <strong>Běh byl přerušen</strong>
-<p>{{ stav.chyba or "Bez uvedené příčiny." }}</p>
+<p>{{ stav.error or "Bez uvedené příčiny." }}</p>
 <p>Pokračovat lze spuštěním pokracovat.bat.</p>
 </div>
-{% elif stav.stav == "dokoncen" %}
+{% elif stav.status == "completed" %}
 <div class="blok ok">
 <p><strong>{{ duvod }}</strong></p>
 {% if fin_skore %}<p>Finální skóre: <strong>{{ fin_skore }}</strong> (verze {{ finalni }})</p>{% endif %}
@@ -41,8 +41,8 @@ ul { margin: 0.3rem 0; }
 {% else %}
 <div class="blok info">Běh neskončil (nebo byl ukončen bez záznamu). Přehled ukazuje, co je zatím hotové.</div>
 {% endif %}
-{% if stav.varovani %}
-<div class="blok info"><strong>Varování</strong><ul>{% for v in stav.varovani %}<li>{{ v }}</li>{% endfor %}</ul></div>
+{% if stav.warnings %}
+<div class="blok info"><strong>Varování</strong><ul>{% for v in stav.warnings %}<li>{{ v }}</li>{% endfor %}</ul></div>
 {% endif %}
 
 <h2>2. Skóre podle kritérií</h2>
@@ -67,7 +67,7 @@ ul { margin: 0.3rem 0; }
 <h2>4. K ověření</h2>
 {% if tvrzeni %}
 <h3>Tvrzení, která hodnotitel doporučuje ověřit</h3>
-<ul>{% for t in tvrzeni %}<li>{{ t.citace }} – {{ t.proc }}</li>{% endfor %}</ul>
+<ul>{% for t in tvrzeni %}<li>{{ t.citation }} – {{ t.reason }}</li>{% endfor %}</ul>
 {% endif %}
 {% if podezrele %}
 <h3>Údaje, které nejsou v poptávce ani v podkladech</h3>
@@ -83,9 +83,9 @@ ul { margin: 0.3rem 0; }
 <table>
 <tr><th>Hodnocení</th><th>Návrhů</th><th>Přijato</th><th>Částečně</th><th>Odmítnuto</th></tr>
 {% for r in kola %}<tr><td>{{ r.kolo }}</td><td>{{ r.navrhu }}</td>
-{% if r.posouzeno %}<td>{{ r.prijato }}</td><td>{{ r.castecne }}</td><td>{{ r.odmitnuto }}</td>{% else %}<td colspan="3">neposouzeno</td>{% endif %}</tr>
+{% if r.posouzeno %}<td>{{ r.accepted }}</td><td>{{ r.partial }}</td><td>{{ r.rejected }}</td>{% else %}<td colspan="3">neposouzeno</td>{% endif %}</tr>
 {% endfor %}
-<tr class="celkem"><td>Celkem</td><td>{{ soucet.navrhu }}</td><td>{{ soucet.prijato }}</td><td>{{ soucet.castecne }}</td><td>{{ soucet.odmitnuto }}</td></tr>
+<tr class="celkem"><td>Celkem</td><td>{{ soucet.navrhu }}</td><td>{{ soucet.accepted }}</td><td>{{ soucet.partial }}</td><td>{{ soucet.rejected }}</td></tr>
 </table>
 {% endif %}
 

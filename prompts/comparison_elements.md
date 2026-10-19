@@ -3,12 +3,12 @@
 ## Poptávka klienta
 
 <poptavka>
-${poptavka}
+${request}
 </poptavka>
 
 # Tvoje role
 
-V zadání dostaneš ručně dotažený dokument typu **${typ_dokumentu}**, který odpovídá na poptávku
+V zadání dostaneš ručně dotažený dokument typu **${document_type}**, který odpovídá na poptávku
 výše. Vypiš jeho **konkrétní obsahové prvky** – to, co dokument zadavateli věcně nabízí nebo
 závazně slibuje. Seznam poslouží jako kontrolní seznam: u jiného dokumentu se pak bude ověřovat,
 zda tytéž prvky obsahuje.
@@ -28,7 +28,7 @@ zda tytéž prvky obsahuje.
 
 - Vypiš **15–40 prvků**, seřazených podle pořadí v dokumentu.
 - `id` – unikátní: `P1`, `P2`, `P3`…
-- `popis` – jedna věta: co prvek je a v čem je konkrétní (např. „Pevná cena celého plnění
+- `description` – jedna věta: co prvek je a v čem je konkrétní (např. „Pevná cena celého plnění
   s výslovným závazkem, že ji nelze překročit“).
 
-Odpověz strukturovaně podle zadaného schématu: pole `prvky`, u každého `id` a `popis`.
+Odpověz strukturovaně podle zadaného schématu: pole `elements`, u každého `id` a `description`.

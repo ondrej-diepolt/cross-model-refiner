@@ -9,7 +9,7 @@ import anthropic
 import pydantic
 from pydantic import BaseModel
 
-from refiner.data import Spotreba as TokenUsage
+from refiner.data import TokenUsage
 from refiner.configuration import ModelSettings
 from refiner.models.errors import ModelError, parsing_error, convert_exception
 
@@ -60,9 +60,9 @@ class ClaudeModel:
         """Record usage (tokens are billed on errors too) and convert stop_reason to an error."""
         u = msg.usage
         self._usage.append(TokenUsage(
-            krok=step, model=self.name, vstup=u.input_tokens, vystup=u.output_tokens,
-            cache_cteni=u.cache_read_input_tokens or 0,
-            cache_zapis=getattr(u, "cache_creation_input_tokens", None) or 0))
+            step=step, model=self.name, input_tokens=u.input_tokens, output_tokens=u.output_tokens,
+            cache_read_tokens=u.cache_read_input_tokens or 0,
+            cache_write_tokens=getattr(u, "cache_creation_input_tokens", None) or 0))
         if msg.stop_reason == "refusal":
             category = getattr(getattr(msg, "stop_details", None), "category", None)
             raise ModelError('refused', _SERVICE, detail=str(category or "nespecifikováno"))

@@ -6,16 +6,16 @@ from types import SimpleNamespace
 
 import pytest
 
-from refiner.data import Spotreba as TokenUsage, VystupNalezitosti as RequirementsOutput
+from refiner.data import TokenUsage, RequirementsOutput
 from refiner.configuration import load_settings
-from refiner.kroky import s_opravou as with_repair
+from refiner.steps import with_repair as with_repair
 from refiner.models.errors import ModelError
 from refiner.models.claude_cli import ClaudeCliModel, claude_error_kind
 from refiner.models.subprocess import ProcessTimeout, ProcessResult
 
 ROOT = Path(__file__).parent.parent
 
-REQUIREMENTS = {"nalezitosti": [{"id": "N1", "text": "Metodika", "citace": "popis metodiky"}]}
+REQUIREMENTS = {'requirements': [{"id": "N1", "text": "Metodika", 'citation': "popis metodiky"}]}
 USAGE = {"input_tokens": 100, "output_tokens": 50, "cache_read_input_tokens": 30,
          "cache_creation_input_tokens": 20}
 OK_JSON = {"type": "result", "subtype": "success", "is_error": False, "result": "hotovo",
@@ -69,7 +69,7 @@ def model(*responses, **kw):
 
 
 def call_json(m, **kw):
-    return m.json("INSTRUKCE", "ZADANI-123", RequirementsOutput, step="nalezitosti", **kw)
+    return m.json("INSTRUKCE", "ZADANI-123", RequirementsOutput, step='requirements', **kw)
 
 
 def test_task_only_in_stdin_and_instructions_in_file():
@@ -99,7 +99,7 @@ def test_model_and_effort_from_configuration_and_extraction():
     m, s = model(ok(), ok(), ok(result="text"))
     call_json(m)
     call_json(m, effort="low")
-    m.text("I", "Z", step="navrh")
+    m.text("I", "Z", step='suggestion')
     efforts = [v.argv[v.argv.index("--effort") + 1] for v in s.calls]
     assert efforts == ["high", "low", "high"]
     assert "--json-schema" not in s.calls[2].argv
@@ -132,14 +132,14 @@ def test_cwd_empty_and_removed_after_call():
 def test_json_success_and_usage():
     m, _ = model(ok())
     assert call_json(m) == RequirementsOutput.model_validate(REQUIREMENTS)
-    assert m.take_usage() == [TokenUsage(krok="nalezitosti", model="claude-opus-5-5", vstup=100,
-                                              vystup=50, cache_cteni=30, cache_zapis=20, predplatne=True)]
+    assert m.take_usage() == [TokenUsage(step='requirements', model="claude-opus-5-5", input_tokens=100,
+                                              output_tokens=50, cache_read_tokens=30, cache_write_tokens=20, subscription=True)]
     assert m.take_usage() == []
 
 
 def test_text_returns_result():
     m, _ = model(ok(result="Ahoj světe"))
-    assert m.text("I", "Z", step="navrh") == "Ahoj světe"
+    assert m.text("I", "Z", step='suggestion') == "Ahoj světe"
 
 
 def test_json_without_structured_output_is_invalid():
@@ -161,9 +161,9 @@ def test_json_exhausted_schema_retries_is_invalid():
 
 
 def test_json_schema_failure_triggers_repair():
-    invalid = ok(structured_output={"nalezitosti": "ne seznam"})
+    invalid = ok(structured_output={'requirements': "ne seznam"})
     m, s = model(invalid, ok())
-    v = with_repair(m, "ZADANI", lambda z: m.json("I", z, RequirementsOutput, step="nalezitosti"),
+    v = with_repair(m, "ZADANI", lambda z: m.json("I", z, RequirementsOutput, step='requirements'),
                   lambda _: [], lambda _: "")
     assert v == RequirementsOutput.model_validate(REQUIREMENTS) and len(s.calls) == 2
     assert "## Oprava" in s.calls[1].stdin

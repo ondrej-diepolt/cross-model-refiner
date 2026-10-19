@@ -3,22 +3,22 @@
 ## Poptávka klienta
 
 <poptavka>
-${poptavka}
+${request}
 </poptavka>
 
 ## Podklady dodavatele (profil firmy)
 
 <podklady>
-${podklady}
+${materials}
 </podklady>
 
 ## Povinné náležitosti (vytažené z poptávky)
 
-${nalezitosti}
+${requirements}
 
 # Úkol
 
-Jsi zkušený konzultant. Na základě zdrojů výše napiš kompletní dokument typu **${typ_dokumentu}**
+Jsi zkušený konzultant. Na základě zdrojů výše napiš kompletní dokument typu **${document_type}**
 jako odpověď na poptávku. Dokument musí být konkrétní, věcně správný a připravený k odeslání po
 doplnění označených údajů.
 
@@ -59,11 +59,11 @@ Každý údaj v dokumentu patří do jednoho ze tří druhů. Drž se pravidel p
 
 Pokyny ke struktuře:
 
-${pokyny_struktura}
+${structure_instructions}
 
 ## Kritéria, podle kterých bude dokument hodnocen
 
-${kriteria}
+${criteria}
 
 Vedle těchto kritérií se hodnotí i fakta: každý vymyšlený údaj (neznámý fakt bez placeholderu)
 dokument výrazně penalizuje.

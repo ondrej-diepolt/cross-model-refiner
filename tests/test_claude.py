@@ -5,7 +5,7 @@ import httpx2
 import pytest
 from pydantic import BaseModel
 
-from refiner.data import Spotreba as TokenUsage, VystupNalezitosti as RequirementsOutput
+from refiner.data import TokenUsage, RequirementsOutput
 from refiner.configuration import ClaudeSettings, GptSettings, ModelSettings
 from refiner.models.errors import ModelError
 from refiner.models.claude import ClaudeModel
@@ -67,9 +67,9 @@ class FakeClient:
 
 
 def test_json_sends_cache_effort_and_fallback():
-    client = FakeClient(message(parsed=RequirementsOutput(nalezitosti=[])))
+    client = FakeClient(message(parsed=RequirementsOutput(requirements=[])))
     m = ClaudeModel(settings(), client)
-    m.json("INSTR", "ZADANI", RequirementsOutput, step="nalezitosti", effort="medium")
+    m.json("INSTR", "ZADANI", RequirementsOutput, step='requirements', effort="medium")
     kw = client.last_kwargs
     assert kw["model"] == "claude-opus-5-5"
     assert kw["system"][0]["cache_control"] == {"type": "ephemeral"}
@@ -86,21 +86,21 @@ def test_json_sends_cache_effort_and_fallback():
 
 def test_json_streams():
     """Thinking tokens count toward max_tokens; the SDK rejects long non-streaming calls."""
-    client = FakeClient(message(parsed=RequirementsOutput(nalezitosti=[])))
+    client = FakeClient(message(parsed=RequirementsOutput(requirements=[])))
     out = ClaudeModel(settings(), client).json("I", "Z", RequirementsOutput, step="k")
-    assert out == RequirementsOutput(nalezitosti=[])
+    assert out == RequirementsOutput(requirements=[])
     assert client.stream_calls == 1
     assert not hasattr(client.beta.messages, "parse")
 
 
 def test_json_default_effort_from_settings():
-    client = FakeClient(message(parsed=RequirementsOutput(nalezitosti=[])))
+    client = FakeClient(message(parsed=RequirementsOutput(requirements=[])))
     ClaudeModel(settings(), client).json("I", "Z", RequirementsOutput, step="k")
     assert client.last_kwargs["output_config"]["effort"] == "high"
 
 
 def test_json_without_fallback_when_disabled():
-    client = FakeClient(message(parsed=RequirementsOutput(nalezitosti=[])))
+    client = FakeClient(message(parsed=RequirementsOutput(requirements=[])))
     ClaudeModel(settings(fallback=False), client).json("I", "Z", RequirementsOutput, step="k")
     assert "fallbacks" not in client.last_kwargs
     assert "betas" not in client.last_kwargs
@@ -108,7 +108,7 @@ def test_json_without_fallback_when_disabled():
 
 def test_text_streams_and_combines_blocks():
     client = FakeClient(message(blocks=("Ahoj ", "světe")))
-    out = ClaudeModel(settings(), client).text("I", "Z", step="navrh")
+    out = ClaudeModel(settings(), client).text("I", "Z", step='suggestion')
     assert out == "Ahoj světe"
     assert client.last_kwargs["max_tokens"] == 64000
     assert "output_format" not in client.last_kwargs
@@ -173,11 +173,11 @@ def test_sdk_exception_is_converted():
 
 
 def test_usage():
-    client = FakeClient(message(parsed=RequirementsOutput(nalezitosti=[])))
+    client = FakeClient(message(parsed=RequirementsOutput(requirements=[])))
     m = ClaudeModel(settings(), client)
-    m.json("I", "Z", RequirementsOutput, step="nalezitosti")
-    assert m.take_usage() == [TokenUsage(krok="nalezitosti", model="claude-opus-5-5",
-                                              vstup=100, vystup=50, cache_cteni=30, cache_zapis=20)]
+    m.json("I", "Z", RequirementsOutput, step='requirements')
+    assert m.take_usage() == [TokenUsage(step='requirements', model="claude-opus-5-5",
+                                              input_tokens=100, output_tokens=50, cache_read_tokens=30, cache_write_tokens=20)]
     assert m.take_usage() == []
 
 
@@ -186,7 +186,7 @@ def test_usage_without_cache():
     m = ClaudeModel(settings(), client)
     m.text("I", "Z", step="t")
     s = m.take_usage()[0]
-    assert s.cache_cteni == 0 and s.cache_zapis == 0
+    assert s.cache_read_tokens == 0 and s.cache_write_tokens == 0
 
 
 def test_missing_key_is_authentication_error():

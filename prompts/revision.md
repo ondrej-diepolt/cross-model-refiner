@@ -3,18 +3,18 @@
 ## Poptávka klienta
 
 <poptavka>
-${poptavka}
+${request}
 </poptavka>
 
 ## Podklady dodavatele (profil firmy)
 
 <podklady>
-${podklady}
+${materials}
 </podklady>
 
 ## Povinné náležitosti (vytažené z poptávky)
 
-${nalezitosti}
+${requirements}
 
 # Tvoje role
 

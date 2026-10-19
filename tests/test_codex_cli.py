@@ -7,17 +7,17 @@ from types import SimpleNamespace
 import pytest
 from openai.lib._pydantic import to_strict_json_schema
 
-from refiner.data import Hodnoceni as Evaluation, Posouzeni as SuggestionReview, Spotreba as TokenUsage, VystupNalezitosti as RequirementsOutput
+from refiner.data import Evaluation, SuggestionReview as SuggestionReview, TokenUsage, RequirementsOutput
 from refiner.configuration import load_settings
-from refiner.kroky import s_opravou as with_repair
+from refiner.steps import with_repair as with_repair
 from refiner.models.errors import ModelError
 from refiner.models.codex_cli import CodexModel, codex_error_kind, read_events
 from refiner.models.subprocess import ProcessTimeout, ProcessResult
-from refiner.porovnani import Pokryti as Coverage, SeznamPrvku as ReferenceElements, Srovnani as PairComparison
+from refiner.porovnani import Coverage as Coverage, ReferenceElements as ReferenceElements, PairComparison as PairComparison
 
 ROOT = Path(__file__).parent.parent
 
-REQUIREMENTS = {"nalezitosti": [{"id": "N1", "text": "Metodika", "citace": "popis metodiky"}]}
+REQUIREMENTS = {'requirements': [{"id": "N1", "text": "Metodika", 'citation': "popis metodiky"}]}
 USAGE = {"input_tokens": 2000, "cached_input_tokens": 500, "output_tokens": 300,
          "reasoning_output_tokens": 100}
 LOGIN_OK = ProcessResult(0, "", "Logged in using ChatGPT\n")
@@ -84,7 +84,7 @@ def json_response(content=REQUIREMENTS, stdout=None):
     return (ok_result(stdout), json.dumps(content))
 
 
-def call_json(m, step="hodnoceni_1"):
+def call_json(m, step='evaluation_1'):
     return m.json("INSTRUKCE", "ZADANI-123", RequirementsOutput, step=step)
 
 
@@ -136,7 +136,7 @@ def test_schema_is_strict():
 
 def test_text_without_schema():
     m, s = model((ok_result(), "Ahoj světe"))
-    assert m.text("I", "Z", step="navrh") == "Ahoj světe"
+    assert m.text("I", "Z", step='suggestion') == "Ahoj světe"
     assert "--output-schema" not in s.calls[0].argv
 
 
@@ -176,8 +176,8 @@ def test_cwd_empty_and_removed_after_call():
 def test_json_success_and_usage():
     m, _ = model(json_response())
     assert call_json(m) == RequirementsOutput.model_validate(REQUIREMENTS)
-    assert m.take_usage() == [TokenUsage(krok="hodnoceni_1", model="gpt-6-astra", vstup=2000, vystup=300,
-                                              cache_cteni=500, predplatne=True)]
+    assert m.take_usage() == [TokenUsage(step='evaluation_1', model="gpt-6-astra", input_tokens=2000, output_tokens=300,
+                                              cache_read_tokens=500, subscription=True)]
     assert m.take_usage() == []
 
 
@@ -186,7 +186,7 @@ def test_non_json_stdout_lines_are_skipped():
                       {"type": "turn.completed", "usage": USAGE})
     m, _ = model(json_response(stdout=stdout))
     assert call_json(m) == RequirementsOutput.model_validate(REQUIREMENTS)
-    assert m.take_usage()[0].vstup == 2000
+    assert m.take_usage()[0].input_tokens == 2000
 
 
 def test_missing_output_file_is_invalid():
@@ -199,7 +199,7 @@ def test_missing_output_file_is_invalid():
 def test_empty_text_output_file_is_other():
     m, _ = model((ok_result(), "  \n"))
     with pytest.raises(ModelError) as e:
-        m.text("I", "Z", step="navrh")
+        m.text("I", "Z", step='suggestion')
     assert e.value.kind == 'other'
 
 
@@ -383,4 +383,4 @@ def test_codex_item_error_warning_preserves_call():
                       {"type": "turn.completed", "usage": {**USAGE, "cache_write_input_tokens": 0}})
     m, _ = model(json_response(stdout=stdout))
     assert call_json(m) == RequirementsOutput.model_validate(REQUIREMENTS)
-    assert m.take_usage()[0].vstup == 2000
+    assert m.take_usage()[0].input_tokens == 2000

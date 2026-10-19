@@ -10,7 +10,7 @@ from typing import Any, TypeVar
 import pydantic
 from pydantic import BaseModel
 
-from refiner.data import Spotreba as TokenUsage
+from refiner.data import TokenUsage
 from refiner.configuration import ModelSettings
 from refiner.models import subprocess
 from refiner.models.errors import ModelError, ErrorKind, parsing_error, redact_keys
@@ -115,9 +115,9 @@ class ClaudeCliModel:
         u = response.get("usage")
         if isinstance(u, dict):
             self._usage.append(TokenUsage(
-                krok=step, model=self.name, vstup=u.get("input_tokens") or 0,
-                vystup=u.get("output_tokens") or 0, cache_cteni=u.get("cache_read_input_tokens") or 0,
-                cache_zapis=u.get("cache_creation_input_tokens") or 0, predplatne=True))
+                step=step, model=self.name, input_tokens=u.get("input_tokens") or 0,
+                output_tokens=u.get("output_tokens") or 0, cache_read_tokens=u.get("cache_read_input_tokens") or 0,
+                cache_write_tokens=u.get("cache_creation_input_tokens") or 0, subscription=True))
         if response.get("is_error") or v.returncode != 0:
             if response.get("subtype") == "error_max_structured_output_retries":
                 raise ModelError('invalid_output', _SERVICE, detail="vyčerpané pokusy o strukturovaný výstup")

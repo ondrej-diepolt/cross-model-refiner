@@ -23,15 +23,15 @@ def _offline(monkeypatch):
 
 
 @pytest.fixture
-def koren_repa() -> Path:
+def repo_root() -> Path:
     return Path(__file__).parent.parent
 
 
 @pytest.fixture
-def zdroje(koren_repa):
-    from tests.pomocne import zdroje_test
+def sources(repo_root):
+    from tests.helpers import make_sources
 
-    return zdroje_test(koren_repa)
+    return make_sources(repo_root)
 
 
 @pytest.fixture

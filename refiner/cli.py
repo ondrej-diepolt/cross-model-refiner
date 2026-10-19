@@ -45,7 +45,7 @@ from refiner.models.interface import Model
 from refiner.porovnani import nacti_referenci, najdi_referenci
 from refiner.input import InputError, find_inputs, find_template, resolve_materials_directory
 
-KOREN = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent
 
 KLICE: tuple[tuple[str, Service], ...] = (("ANTHROPIC_API_KEY", "Anthropic"), ("OPENAI_API_KEY", "OpenAI"))
 KLIC_HODNOTITELE: tuple[tuple[str, Service], ...] = (("OPENAI_API_KEY", "OpenAI"),)
@@ -65,7 +65,7 @@ HLASKA_POROVNAT_VOLBY = ("Příkaz porovnat nejde kombinovat s --nanecisto ani -
 HLASKA_KONEC_VSTUPU = "Volba nebyla zadána (konec vstupu)."
 HLASKA_NANECISTO = "Ukázkový režim --nanecisto: falešné modely, bez volání API a bez nákladů."
 
-PRERUSENE_STAVY = {"prerusen", "bezi"}
+PRERUSENE_STAVY = {'interrupted', 'running'}
 
 TovarnaModelu = Callable[[Configuration, bool], tuple[Model, Model]]
 
@@ -117,7 +117,7 @@ class _Konzole:
         else:
             self._zapis(f"{text}\n")
 
-    def ukonci(self) -> None:
+    def finish(self) -> None:
         if self._rozepsano:
             self._rozepsano = False
             self._zapis("\n")
@@ -248,10 +248,10 @@ def main(
     hodnotitel_fn = ((lambda konf: tovarna_modelu(konf, False)[1]) if tovarna_modelu is not None
                      else _vychozi_hodnotitel)
     try:
-        return _spust(args, Path(koren) if koren is not None else KOREN, vstup_fn, konzole,
+        return _spust(args, Path(koren) if koren is not None else ROOT, vstup_fn, konzole,
                       tovarna_modelu or _vychozi_tovarna, hodnotitel_fn, otevrit_prehled)
     finally:
-        konzole.ukonci()
+        konzole.finish()
 
 
 def _spust(
@@ -291,25 +291,25 @@ def _spust(
     try:
         if porovnat:
             # Porovnání volá vždy skutečný GPT: ukázkové běhy se přeskočí, resp. odmítnou.
-            slozka = _slozka_behu(koren, args.slozka, {"dokoncen"}, nanecisto=False)
+            slozka = _slozka_behu(koren, args.slozka, {'completed'}, nanecisto=False)
             if slozka is None:
                 konzole(HLASKA_ZADNY_DOKONCENY)
                 return 2
-            beh, zdroje = otevri_dokonceny(slozka, koren=koren, nanecisto=False, hlaseni=konzole)
-            obnov_prompty_porovnani(beh, koren / "prompty")
+            beh, sources = otevri_dokonceny(slozka, koren=koren, nanecisto=False, hlaseni=konzole)
+            obnov_prompty_porovnani(beh, koren / 'prompts')
             reference = _cesta_reference(koren, args.reference)
             reference_md = nacti_referenci(reference)
-            hodnotitel = hodnotitel_fn(zdroje.konfigurace)
-            konzole(f"Porovnávám běh {beh.slozka} s referencí {reference.name}")
+            hodnotitel = hodnotitel_fn(sources.configuration)
+            konzole(f"Porovnávám běh {beh.directory} s referencí {reference.name}")
         elif args.pokracovat is not None:
             slozka = _slozka_behu(koren, args.pokracovat, PRERUSENE_STAVY, nanecisto=args.nanecisto)
             if slozka is None:
                 konzole(HLASKA_ZADNY_PRERUSENY_NANECISTO if args.nanecisto else HLASKA_ZADNY_PRERUSENY)
                 return 2
             # Oddíl models (limity, časový limit) a ceny z aktuálního settings.yaml, zbytek z kopie běhu.
-            beh, zdroje = obnov_beh(slozka, koren=koren, nanecisto=args.nanecisto, hlaseni=konzole)
-            konzole(f"Pokračuji v běhu: {beh.slozka}")
-            pisatel, hodnotitel = tovarna(zdroje.konfigurace, args.nanecisto)
+            beh, sources = obnov_beh(slozka, koren=koren, nanecisto=args.nanecisto, hlaseni=konzole)
+            konzole(f"Pokračuji v běhu: {beh.directory}")
+            pisatel, hodnotitel = tovarna(sources.configuration, args.nanecisto)
         else:
             vstup = _zvol_vstup(koren, konzole, vstup_fn)
             profil = _zvol_profil(koren, konzole, vstup_fn)
@@ -320,8 +320,8 @@ def _spust(
             )
             pisatel, hodnotitel = tovarna(konfigurace, args.nanecisto)
             konzole(f"Poptávka: {vstup.name}, profil: {konfigurace.profile.name}")
-            beh, zdroje = zahaj_beh(koren, vstup, profil, datetime.now(), nanecisto=args.nanecisto)
-            konzole(f"Složka běhu: {beh.slozka}")
+            beh, sources = zahaj_beh(koren, vstup, profil, datetime.now(), nanecisto=args.nanecisto)
+            konzole(f"Složka běhu: {beh.directory}")
     except (ConfigurationError, InputError) as e:
         konzole(str(e))
         return 2
@@ -339,16 +339,16 @@ def _spust(
         return 2
 
     if porovnat:
-        kod = porovnej_beh(beh, zdroje, reference_md, hodnotitel, konzole, reference.name)
+        kod = porovnej_beh(beh, sources, reference_md, hodnotitel, konzole, reference.name)
         html = "porovnani.html"
     else:
         sablona = find_template(resolve_materials_directory(koren))
-        kod = dokonci(beh, zdroje, pisatel, hodnotitel, konzole,
+        kod = dokonci(beh, sources, pisatel, hodnotitel, konzole,
                       sablona)
         html = "prehled.html"
     if kod == 0 and otevrit_prehled:
         try:
-            webbrowser.open((beh.slozka / html).resolve().as_uri())
+            webbrowser.open((beh.directory / html).resolve().as_uri())
         except Exception:
             pass   # přehled je jen pohodlí navíc; cestu už vypsal dokonci() / porovnej_beh()
     return kod

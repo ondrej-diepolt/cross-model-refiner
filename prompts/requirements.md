@@ -3,7 +3,7 @@
 ## Poptávka klienta
 
 <poptavka>
-${poptavka}
+${request}
 </poptavka>
 
 # Úkol
@@ -38,7 +38,7 @@ Nevytahuj:
    objeví.
 3. **`text`** – stručný název požadavku vlastními slovy (nejvýš asi 10 slov), např. „Harmonogram
    s hlavními milníky“.
-4. **`citace`** – **doslovný** úryvek z poptávky, který požadavek dokládá:
+4. **`citation`** – **doslovný** úryvek z poptávky, který požadavek dokládá:
    - zkopíruj ho přesně znak po znaku, včetně diakritiky, velkých písmen a interpunkce;
    - nic nezkracuj výpustkou („…“), neopravuj překlepy, nepřeformulovávej, nespojuj dvě místa;
    - stačí nejkratší souvislý úsek, ze kterého je požadavek zřejmý (obvykle část věty nebo
@@ -53,5 +53,5 @@ Nevytahuj:
 
 ## Výstup
 
-Odpověz strukturovaně podle zadaného schématu: seznam `nalezitosti`, každá položka s poli `id`,
-`text` a `citace`. Nic dalšího nepřidávej.
+Odpověz strukturovaně podle zadaného schématu: seznam `requirements`, každá položka s poli `id`,
+`text` a `citation`. Nic dalšího nepřidávej.

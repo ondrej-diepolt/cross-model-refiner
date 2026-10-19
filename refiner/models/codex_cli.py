@@ -11,7 +11,7 @@ import pydantic
 from openai.lib._pydantic import to_strict_json_schema
 from pydantic import BaseModel
 
-from refiner.data import Spotreba as TokenUsage
+from refiner.data import TokenUsage
 from refiner.configuration import ModelSettings
 from refiner.models import subprocess
 from refiner.models.errors import ModelError, ErrorKind, parsing_error, redact_keys
@@ -142,9 +142,9 @@ class CodexModel:
         usage, messages, types = read_events(v.stdout)
         if usage is not None:
             self._usage.append(TokenUsage(
-                krok=step, model=self.name, vstup=usage.get("input_tokens", 0),
-                vystup=usage.get("output_tokens", 0), cache_cteni=usage.get("cached_input_tokens", 0),
-                predplatne=True))
+                step=step, model=self.name, input_tokens=usage.get("input_tokens", 0),
+                output_tokens=usage.get("output_tokens", 0), cache_read_tokens=usage.get("cached_input_tokens", 0),
+                subscription=True))
         for type_ in sorted(types & _TOOLS):
             _log.warning("Codex used a tool (%s) despite tools being disabled (step %s)", type_, step)
         if v.returncode != 0 or (messages and not response.strip()):

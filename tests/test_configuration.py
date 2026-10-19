@@ -47,8 +47,8 @@ def _settings(tmp_path, replacements=None):
     return _write(tmp_path / "settings.yaml", text)
 
 
-def test_loads_repository_configuration(koren_repa):
-    k = load_configuration(koren_repa / "settings.yaml", koren_repa / "profiles" / "proposal.yaml")
+def test_loads_repository_configuration(repo_root):
+    k = load_configuration(repo_root / "settings.yaml", repo_root / "profiles" / "proposal.yaml")
     assert k.settings.loop.target_score == 9.5 and k.settings.loop.max_revisions == 3
     assert k.settings.models.claude.model == "claude-opus-5-5"
     # Reasoning counts toward output limits; low limits caused truncated responses.
@@ -140,7 +140,7 @@ def test_invalid_yaml_reports_line(tmp_path):
     assert "řádek" in str(e.value) and "profile.yaml" in str(e.value)
 
 
-def test_request_criteria_add_and_reweight(tmp_path, koren_repa):
+def test_request_criteria_add_and_reweight(tmp_path, repo_root):
     kr = _write(
         tmp_path / "a.criteria.yaml",
         """\
@@ -152,7 +152,7 @@ def test_request_criteria_add_and_reweight(tmp_path, koren_repa):
         weights: {B6: 0.05}
         """,
     )
-    k = load_configuration(koren_repa / "settings.yaml", koren_repa / "profiles" / "proposal.yaml", kr)
+    k = load_configuration(repo_root / "settings.yaml", repo_root / "profiles" / "proposal.yaml", kr)
     ids = [c.id for c in k.profile_criteria]
     assert ids[-1] == "X1"
     assert next(c for c in k.profile_criteria if c.id == "B6").weight == 0.05
@@ -160,10 +160,10 @@ def test_request_criteria_add_and_reweight(tmp_path, koren_repa):
     assert next(c for c in k.profile.criteria if c.id == "B6").weight == 0.10
 
 
-def test_request_criteria_unknown_weight_id(tmp_path, koren_repa):
+def test_request_criteria_unknown_weight_id(tmp_path, repo_root):
     kr = _write(tmp_path / "a.criteria.yaml", "weights: {B9: 0.1}\n")
     with pytest.raises(ConfigurationError) as e:
-        load_configuration(koren_repa / "settings.yaml", koren_repa / "profiles" / "proposal.yaml", kr)
+        load_configuration(repo_root / "settings.yaml", repo_root / "profiles" / "proposal.yaml", kr)
     assert "B9" in str(e.value)
 
 
@@ -199,12 +199,12 @@ def test_criteria_path_for_request(tmp_path):
     assert criteria_path_for_request(input) == kr
 
 
-def test_available_profiles(koren_repa):
-    assert available_profiles(koren_repa / "profiles") == ["proposal", "policy"]
+def test_available_profiles(repo_root):
+    assert available_profiles(repo_root / "profiles") == ["proposal", "policy"]
 
 
-def test_default_mode_is_subscription(koren_repa):
-    n = load_settings(koren_repa / "settings.yaml")
+def test_default_mode_is_subscription(repo_root):
+    n = load_settings(repo_root / "settings.yaml")
     assert n.models.mode == "subscription"
     assert n.models.subscription.claude.model == "claude-opus-5-5"
     assert n.models.subscription.codex.model == "gpt-6-astra"
@@ -261,9 +261,9 @@ def english_settings(tmp_path):
 
 
 @pytest.fixture
-def legacy_settings(tmp_path, koren_repa):
+def legacy_settings(tmp_path, repo_root):
     path = tmp_path / "legacy.yaml"
-    path.write_bytes((koren_repa / "tests/fixtures/legacy/completed/data/konfigurace/nastaveni.yaml").read_bytes())
+    path.write_bytes((repo_root / "tests/fixtures/legacy/completed/data/konfigurace/nastaveni.yaml").read_bytes())
     return path
 
 

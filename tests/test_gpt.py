@@ -4,7 +4,7 @@ import httpx2
 import openai
 import pytest
 
-from refiner.data import Hodnoceni as Evaluation, Spotreba as TokenUsage
+from refiner.data import Evaluation, TokenUsage
 from refiner.configuration import ClaudeSettings, GptSettings, ModelSettings
 from refiner.models.errors import ModelError
 from refiner.models.gpt import GptModel
@@ -18,8 +18,8 @@ def settings() -> ModelSettings:
         max_retries=2, timeout_s=30.0)
 
 
-EVALUATION = Evaluation(kriteria=[], vymyslena_fakta=[], tvrzeni_k_overeni=[], navrhy=[],
-                      celkovy_komentar="ok")
+EVALUATION = Evaluation(criteria=[], fabricated_facts=[], claims_to_verify=[], suggestions=[],
+                      overall_comment="ok")
 
 
 def response(parsed=None, status="completed", reason=None, output=None, text="T",
@@ -52,7 +52,7 @@ class FakeClient:
 def test_json_sends_reasoning_and_schema():
     client = FakeClient(response(parsed=EVALUATION))
     m = GptModel(settings(), client)
-    out = m.json("INSTR", "ZADANI", Evaluation, step="hodnoceni", effort="low")
+    out = m.json("INSTR", "ZADANI", Evaluation, step='evaluation', effort="low")
     kw = client.last_kwargs
     assert out is EVALUATION and client.called == "parse"
     assert kw["reasoning"] == {"effort": "high"}  # the protocol effort override is ignored
@@ -119,9 +119,9 @@ def test_sdk_exception_is_converted():
 
 def test_usage_with_cached_tokens():
     m = GptModel(settings(), FakeClient(response(parsed=EVALUATION)))
-    m.json("I", "Z", Evaluation, step="hodnoceni")
-    assert m.take_usage() == [TokenUsage(krok="hodnoceni", model="gpt-x",
-                                              vstup=100, vystup=50, cache_cteni=30)]
+    m.json("I", "Z", Evaluation, step='evaluation')
+    assert m.take_usage() == [TokenUsage(step='evaluation', model="gpt-x",
+                                              input_tokens=100, output_tokens=50, cache_read_tokens=30)]
     assert m.take_usage() == []
 
 

@@ -6,66 +6,66 @@ from pathlib import Path
 
 import pytest
 
-from refiner.beh import Beh
+from refiner.run import Run
 from refiner.cli import main
-from refiner.data import Hodnoceni
+from refiner.data import Evaluation
 from refiner.models.errors import ModelError
 from refiner.models.fakes import FakeModel, demo_models
 from refiner.porovnani import (
     OTAZKY_FORMULARE,
-    Pokryti,
-    PokrytiPrvku,
-    PrvekReference,
-    SeznamPrvku,
-    Srovnani,
-    SrovnaniKriteria,
-    VysledekPorovnani,
+    Coverage,
+    ElementCoverage,
+    ReferenceElement,
+    ReferenceElements,
+    PairComparison,
+    CriterionComparison,
+    ComparisonResult,
     najdi_referenci,
     porovnej,
     zkombinuj_srovnani,
 )
-from refiner.smycka import spust_smycku
+from refiner.loop import run_loop
 from refiner.input import InputError
-from tests.pomocne import POPTAVKA_TEST, beh_test, hodnoceni, kriteria_test, skript
+from tests.helpers import TEST_REQUEST, make_run, make_evaluation, make_criteria, scripted_models
 
 ZNACKA = "REFERENCNI-ZNACKA"
 REFERENCE = f"# Nabídka dodavatele\n\nRučně dotažená nabídka {ZNACKA}.\n"
-KROKY = ["porovnani_kalibrace", "porovnani_srovnani_1", "porovnani_srovnani_2",
-         "porovnani_prvky", "porovnani_pokryti"]
+KROKY = ['comparison_calibration', 'comparison_pair_1', 'comparison_pair_2',
+         'comparison_elements', 'comparison_coverage']
 
 
-def k(id_: str, lepsi: str, zduvodneni: str = "Zdůvodnění.") -> SrovnaniKriteria:
-    return SrovnaniKriteria(id=id_, lepsi=lepsi, zduvodneni=zduvodneni)
+def k(id_: str, lepsi: str, zduvodneni: str = "Zdůvodnění.") -> CriterionComparison:
+    return CriterionComparison(id=id_, better=lepsi, rationale=zduvodneni)
 
 
-def _prvky(*popisy: str) -> SeznamPrvku:
-    return SeznamPrvku(prvky=[PrvekReference(id=f"P{i}", popis=p) for i, p in enumerate(popisy, start=1)])
+def _prvky(*popisy: str) -> ReferenceElements:
+    return ReferenceElements(elements=[ReferenceElement(id=f"P{i}", description=p) for i, p in enumerate(popisy, start=1)])
 
 
-def _pokryti(*stavy: tuple[str, str]) -> Pokryti:
-    return Pokryti(polozky=[PokrytiPrvku(id=f"P{i}", stav=s, komentar=c)
+def _pokryti(*stavy: tuple[str, str]) -> Coverage:
+    return Coverage(items=[ElementCoverage(id=f"P{i}", status=s, comment=c)
                             for i, (s, c) in enumerate(stavy, start=1)])
 
 
-def _hodnotitel(**prepsat) -> FakeModel:
+def _hodnotitel(**overrides) -> FakeModel:
     """Falešný hodnotitel pro 5 kroků porovnání; kritéria = N1–N3 + kritéria profilu."""
-    ids = [x.id for x in kriteria_test(3)]
+    ids = [x.id for x in make_criteria(3)]
     odpovedi = {
-        "porovnani_kalibrace": [hodnoceni(9.0, navrhy=0)],
-        "porovnani_srovnani_1": [Srovnani(kriteria=[k(i, "A") for i in ids])],
-        "porovnani_srovnani_2": [Srovnani(kriteria=[k(i, "B") for i in ids])],
-        "porovnani_prvky": [_prvky("Závazný cenový strop", "Kritéria převzetí po etapách", "Definice vady")],
-        "porovnani_pokryti": [_pokryti(("je", "Kap. 2."), ("chybi", "Nikde."), ("castecne", "Jen obecně."))],
+        'comparison_calibration': [make_evaluation(9.0, suggestions=0)],
+        'comparison_pair_1': [PairComparison(criteria=[k(i, "A") for i in ids])],
+        'comparison_pair_2': [PairComparison(criteria=[k(i, "B") for i in ids])],
+        'comparison_elements': [_prvky("Závazný cenový strop", "Kritéria převzetí po etapách", "Definice vady")],
+        'comparison_coverage': [_pokryti(('present', "Kap. 2."), ('missing', "Nikde."), ('partial', "Jen obecně."))],
     }
-    odpovedi.update(prepsat)
+    odpovedi.update(overrides)
     return FakeModel(odpovedi, name="gpt-falesny")
 
 
-def _dokonceny_beh(tmp_path: Path, zdroje) -> tuple[Beh, FakeModel]:
-    beh = beh_test(tmp_path, zdroje)
-    pisatel, hod = skript([9.5])
-    vysledek = spust_smycku(beh, zdroje, pisatel, hod, lambda _: None)
-    beh.ukonci("dokoncen", vysledek.duvod, finalni_verze=vysledek.finalni_verze)
+def _dokonceny_beh(tmp_path: Path, sources) -> tuple[Run, FakeModel]:
+    beh = make_run(tmp_path, sources)
+    pisatel, hod = scripted_models([9.5])
+    vysledek = run_loop(beh, sources, pisatel, hod, lambda _: None)
+    beh.finish('completed', vysledek.reason, final_version=vysledek.final_version)
     return beh, pisatel
 
 
@@ -76,16 +76,16 @@ def _ticho(_: str) -> None:
 # ---------------------------------------------------------------- čisté funkce
 
 def test_zkombinuj_srovnani():
-    s1 = Srovnani(kriteria=[k("B1", "A"), k("B2", "B"), k("B3", "A"), k("B4", "stejne")])
-    s2 = Srovnani(kriteria=[k("B1", "B"), k("B2", "A"), k("B3", "A"), k("B4", "stejne")])
+    s1 = PairComparison(criteria=[k("B1", "A"), k("B2", "B"), k("B3", "A"), k("B4", 'tie')])
+    s2 = PairComparison(criteria=[k("B1", "B"), k("B2", "A"), k("B3", "A"), k("B4", 'tie')])
     assert zkombinuj_srovnani(s1, s2) == {
-        "B1": "generovana", "B2": "reference", "B3": "nerozhodne", "B4": "nerozhodne"}
+        "B1": 'generated', "B2": "reference", "B3": 'tie', "B4": 'tie'}
 
 
 def test_zkombinuj_srovnani_stejne_v_jednom_poradi_je_nerozhodne():
-    s1 = Srovnani(kriteria=[k("B1", "A")])
-    s2 = Srovnani(kriteria=[k("B1", "stejne")])
-    assert zkombinuj_srovnani(s1, s2) == {"B1": "nerozhodne"}
+    s1 = PairComparison(criteria=[k("B1", "A")])
+    s2 = PairComparison(criteria=[k("B1", 'tie')])
+    assert zkombinuj_srovnani(s1, s2) == {"B1": 'tie'}
 
 
 @pytest.mark.parametrize("soubory", [["reference.docx"], ["Nabídka NRB.md"]])
@@ -110,29 +110,29 @@ def test_najdi_referenci_jinak_chyba(tmp_path, soubory):
 
 # ---------------------------------------------------------------- porovnej
 
-def test_porovnej_zapise_vystupy(tmp_path, zdroje):
-    beh, _ = _dokonceny_beh(tmp_path, zdroje)
+def test_porovnej_zapise_vystupy(tmp_path, sources):
+    beh, _ = _dokonceny_beh(tmp_path, sources)
     hod = _hodnotitel()
-    html = porovnej(beh, zdroje, REFERENCE, hod, print).read_text(encoding="utf-8")
-    assert "Kalibrace" in html and (beh.slozka / "porovnani_formular.md").exists()
+    html = porovnej(beh, sources, REFERENCE, hod, print).read_text(encoding="utf-8")
+    assert "Kalibrace" in html and (beh.directory / "porovnani_formular.md").exists()
     assert [krok for krok, *_ in hod.calls] == KROKY
     assert 'href="porovnani_formular.md"' in html
 
-    v = VysledekPorovnani.model_validate_json(
-        (beh.slozka / "data" / "porovnani.json").read_text(encoding="utf-8"))
-    assert v.skore_generovane == beh.stav.skore["1"]
-    assert v.skore_reference.celkem == 9.2   # 0,5·9 + 0,35·9 + 0,15·10
-    assert set(v.srovnani.values()) == {"generovana"}
-    assert list(v.srovnani) == [x.id for x in kriteria_test(3)]
-    assert len(v.zduvodneni["B1"]) == 2
-    assert [p.id for p in v.prvky] == ["P1", "P2", "P3"]
-    assert [p.stav for p in v.pokryti] == ["je", "chybi", "castecne"]
+    v = ComparisonResult.model_validate_json(
+        (beh.directory / "data" / "porovnani.json").read_text(encoding="utf-8"))
+    assert v.generated_score == beh.state.scores["1"]
+    assert v.reference_score.total == 9.2   # 0,5·9 + 0,35·9 + 0,15·10
+    assert set(v.comparison.values()) == {'generated'}
+    assert list(v.comparison) == [x.id for x in make_criteria(3)]
+    assert len(v.rationales["B1"]) == 2
+    assert [p.id for p in v.elements] == ["P1", "P2", "P3"]
+    assert [p.status for p in v.coverage] == ['present', 'missing', 'partial']
 
 
-def test_formular_obsahuje_otazky_z_designu(tmp_path, zdroje):
-    beh, _ = _dokonceny_beh(tmp_path, zdroje)
-    porovnej(beh, zdroje, REFERENCE, _hodnotitel(), _ticho)
-    formular = (beh.slozka / "porovnani_formular.md").read_text(encoding="utf-8")
+def test_formular_obsahuje_otazky_z_designu(tmp_path, sources):
+    beh, _ = _dokonceny_beh(tmp_path, sources)
+    porovnej(beh, sources, REFERENCE, _hodnotitel(), _ticho)
+    formular = (beh.directory / "porovnani_formular.md").read_text(encoding="utf-8")
     assert OTAZKY_FORMULARE == (
         "Odeslal bych to po doplnění placeholderů?",
         "Kolik minut práce do odeslatelné verze?",
@@ -145,181 +145,181 @@ def test_formular_obsahuje_otazky_z_designu(tmp_path, zdroje):
     assert formular.count("Odpověď:") == len(OTAZKY_FORMULARE)
 
 
-def test_poradi_dokumentu_se_prohodi(tmp_path, zdroje):
-    beh, _ = _dokonceny_beh(tmp_path, zdroje)
-    generovana = beh.text("navrh_1")
+def test_poradi_dokumentu_se_prohodi(tmp_path, sources):
+    beh, _ = _dokonceny_beh(tmp_path, sources)
+    generovana = beh.text('draft_1')
     hod = _hodnotitel()
-    porovnej(beh, zdroje, REFERENCE, hod, _ticho)
+    porovnej(beh, sources, REFERENCE, hod, _ticho)
     zadani = {krok: z for krok, _, z in hod.calls}
-    z1, z2 = zadani["porovnani_srovnani_1"], zadani["porovnani_srovnani_2"]
+    z1, z2 = zadani['comparison_pair_1'], zadani['comparison_pair_2']
     assert z1.index(generovana) < z1.index(ZNACKA)
     assert z2.index(ZNACKA) < z2.index(generovana)
     instrukce = {krok: i for krok, i, _ in hod.calls}
     # Dokumenty jsou jen A/B: nic v promptu neprozrazuje, který je generovaný a který referenční.
     for text in (z1.replace(ZNACKA, ""), z2.replace(ZNACKA, "")):
         assert "referen" not in text.lower() and "generovan" not in text.lower()
-    assert "referenční" not in instrukce["porovnani_srovnani_1"].lower()
-    assert "generovan" not in instrukce["porovnani_srovnani_1"].lower()
-    assert instrukce["porovnani_srovnani_1"] == instrukce["porovnani_srovnani_2"]
+    assert "referenční" not in instrukce['comparison_pair_1'].lower()
+    assert "generovan" not in instrukce['comparison_pair_1'].lower()
+    assert instrukce['comparison_pair_1'] == instrukce['comparison_pair_2']
 
 
-def test_kalibrace_hodnoti_referenci_stejnymi_kriterii(tmp_path, zdroje):
-    beh, _ = _dokonceny_beh(tmp_path, zdroje)
+def test_kalibrace_hodnoti_referenci_stejnymi_kriterii(tmp_path, sources):
+    beh, _ = _dokonceny_beh(tmp_path, sources)
     hod = _hodnotitel()
-    porovnej(beh, zdroje, REFERENCE, hod, _ticho)
+    porovnej(beh, sources, REFERENCE, hod, _ticho)
     krok, instrukce, zadani = hod.calls[0]
     assert ZNACKA in zadani and "**N1**" in instrukce and "**B1**" in instrukce
-    assert POPTAVKA_TEST.strip() in instrukce
+    assert TEST_REQUEST.strip() in instrukce
     # Prvky se vytahují z reference, pokrytí se ověřuje v generované nabídce.
     zadani_kroku = {krok: z for krok, _, z in hod.calls}
-    assert ZNACKA in zadani_kroku["porovnani_prvky"]
-    assert ZNACKA not in zadani_kroku["porovnani_pokryti"]
-    assert beh.text("navrh_1") in zadani_kroku["porovnani_pokryti"]
-    assert "**P2** Kritéria převzetí po etapách" in zadani_kroku["porovnani_pokryti"]
+    assert ZNACKA in zadani_kroku['comparison_elements']
+    assert ZNACKA not in zadani_kroku['comparison_coverage']
+    assert beh.text('draft_1') in zadani_kroku['comparison_coverage']
+    assert "**P2** Kritéria převzetí po etapách" in zadani_kroku['comparison_coverage']
 
 
-def test_pisatel_nikdy_nevidi_referenci(tmp_path, zdroje):
-    beh, pisatel = _dokonceny_beh(tmp_path, zdroje)
+def test_pisatel_nikdy_nevidi_referenci(tmp_path, sources):
+    beh, pisatel = _dokonceny_beh(tmp_path, sources)
     hod = _hodnotitel()
-    porovnej(beh, zdroje, REFERENCE, hod, _ticho)
+    porovnej(beh, sources, REFERENCE, hod, _ticho)
     assert pisatel.calls, "pisatel měl během běhu pracovat"
     for _, instrukce, zadani in pisatel.calls:
         assert ZNACKA not in instrukce and ZNACKA not in zadani
     assert any(ZNACKA in z for _, _, z in hod.calls)
 
 
-def test_porovnani_nedokonceneho_behu(tmp_path, zdroje):
-    beh = beh_test(tmp_path, zdroje)
+def test_porovnani_nedokonceneho_behu(tmp_path, sources):
+    beh = make_run(tmp_path, sources)
     hod = _hodnotitel()
     with pytest.raises(InputError):
-        porovnej(beh, zdroje, REFERENCE, hod, _ticho)
+        porovnej(beh, sources, REFERENCE, hod, _ticho)
     assert hod.calls == []
 
 
-def test_porovnani_neprepise_stav_behu_a_ulozi_spotrebu(tmp_path, zdroje):
-    beh, _ = _dokonceny_beh(tmp_path, zdroje)
-    pred = Beh.otevri(beh.slozka).stav
-    porovnej(beh, zdroje, REFERENCE, _hodnotitel(), _ticho)
-    po = Beh.otevri(beh.slozka).stav
-    assert po.stav == "dokoncen" and po.ukonceno == pred.ukonceno
-    assert po.kroky == pred.kroky and po.skore == pred.skore
-    assert po.finalni_verze == pred.finalni_verze and po.duvod_ukonceni == pred.duvod_ukonceni
-    assert [s.krok for s in po.spotreba[len(pred.spotreba):]] == KROKY
+def test_porovnani_neprepise_stav_behu_a_ulozi_spotrebu(tmp_path, sources):
+    beh, _ = _dokonceny_beh(tmp_path, sources)
+    pred = Run.open(beh.directory).state
+    porovnej(beh, sources, REFERENCE, _hodnotitel(), _ticho)
+    po = Run.open(beh.directory).state
+    assert po.status == 'completed' and po.ended_at == pred.ended_at
+    assert po.steps == pred.steps and po.scores == pred.scores
+    assert po.final_version == pred.final_version and po.stop_reason == pred.stop_reason
+    assert [s.step for s in po.usage[len(pred.usage):]] == KROKY
 
 
-def test_opakovane_porovnani_prepise_vystupy(tmp_path, zdroje):
-    beh, _ = _dokonceny_beh(tmp_path, zdroje)
-    porovnej(beh, zdroje, REFERENCE, _hodnotitel(), _ticho)
-    soubory = sorted(p.name for p in beh.slozka.iterdir())
-    formular = beh.slozka / "porovnani_formular.md"
+def test_opakovane_porovnani_prepise_vystupy(tmp_path, sources):
+    beh, _ = _dokonceny_beh(tmp_path, sources)
+    porovnej(beh, sources, REFERENCE, _hodnotitel(), _ticho)
+    soubory = sorted(p.name for p in beh.directory.iterdir())
+    formular = beh.directory / "porovnani_formular.md"
     formular.write_text(formular.read_text(encoding="utf-8").replace(
         "Odpověď:", "Odpověď: ano, 30 minut", 1), encoding="utf-8")
 
-    hod = _hodnotitel(porovnani_pokryti=[_pokryti(("je", "A"), ("je", "B"), ("je", "C"))])
-    porovnej(beh, zdroje, REFERENCE, hod, _ticho)
+    hod = _hodnotitel(comparison_coverage=[_pokryti(('present', "A"), ('present', "B"), ('present', "C"))])
+    porovnej(beh, sources, REFERENCE, hod, _ticho)
 
-    assert sorted(p.name for p in beh.slozka.iterdir()) == soubory
+    assert sorted(p.name for p in beh.directory.iterdir()) == soubory
     assert "Odpověď: ano, 30 minut" in formular.read_text(encoding="utf-8")
-    v = VysledekPorovnani.model_validate_json(
-        (beh.slozka / "data" / "porovnani.json").read_text(encoding="utf-8"))
-    assert [p.stav for p in v.pokryti] == ["je", "je", "je"]
-    assert len([s for s in Beh.otevri(beh.slozka).stav.spotreba if s.krok.startswith("porovnani")]) == 10
+    v = ComparisonResult.model_validate_json(
+        (beh.directory / "data" / "porovnani.json").read_text(encoding="utf-8"))
+    assert [p.status for p in v.coverage] == ['present', 'present', 'present']
+    assert len([s for s in Run.open(beh.directory).state.usage if s.step.startswith("comparison_")]) == 10
 
 
-def test_html_escapuje_vystup_modelu(tmp_path, zdroje):
-    beh, _ = _dokonceny_beh(tmp_path, zdroje)
-    ids = [x.id for x in kriteria_test(3)]
-    kal = hodnoceni(9.0, navrhy=0)
-    kal.kriteria[0].zduvodneni = "<script>alert(0)</script>"
+def test_html_escapuje_vystup_modelu(tmp_path, sources):
+    beh, _ = _dokonceny_beh(tmp_path, sources)
+    ids = [x.id for x in make_criteria(3)]
+    kal = make_evaluation(9.0, suggestions=0)
+    kal.criteria[0].rationale = "<script>alert(0)</script>"
     hod = _hodnotitel(
-        porovnani_kalibrace=[kal],
-        porovnani_srovnani_1=[Srovnani(kriteria=[k(i, "A", "<script>alert(1)</script>") for i in ids])],
-        porovnani_prvky=[_prvky("<script>alert(2)</script>", "<b>tučně</b>", "Definice vady")],
-        porovnani_pokryti=[_pokryti(("je", "<script>alert(3)</script>"), ("chybi", "x"), ("je", "y"))],
+        comparison_calibration=[kal],
+        comparison_pair_1=[PairComparison(criteria=[k(i, "A", "<script>alert(1)</script>") for i in ids])],
+        comparison_elements=[_prvky("<script>alert(2)</script>", "<b>tučně</b>", "Definice vady")],
+        comparison_coverage=[_pokryti(('present', "<script>alert(3)</script>"), ('missing', "x"), ('present', "y"))],
     )
-    html = porovnej(beh, zdroje, REFERENCE, hod, _ticho).read_text(encoding="utf-8")
+    html = porovnej(beh, sources, REFERENCE, hod, _ticho).read_text(encoding="utf-8")
     assert "<script" not in html and "<b>tučně</b>" not in html
     for n in range(4):
         assert f"&lt;script&gt;alert({n})" in html
 
 
-def test_pokryti_chybejici_prvni(tmp_path, zdroje):
-    beh, _ = _dokonceny_beh(tmp_path, zdroje)
+def test_pokryti_chybejici_prvni(tmp_path, sources):
+    beh, _ = _dokonceny_beh(tmp_path, sources)
     hod = _hodnotitel(
-        porovnani_prvky=[_prvky("PRVEK-JE", "PRVEK-CASTECNE", "PRVEK-CHYBI")],
-        porovnani_pokryti=[_pokryti(("je", "k1"), ("castecne", "k2"), ("chybi", "k3"))],
+        comparison_elements=[_prvky("PRVEK-JE", "PRVEK-CASTECNE", "PRVEK-CHYBI")],
+        comparison_coverage=[_pokryti(('present', "k1"), ('partial', "k2"), ('missing', "k3"))],
     )
-    html = porovnej(beh, zdroje, REFERENCE, hod, _ticho).read_text(encoding="utf-8")
+    html = porovnej(beh, sources, REFERENCE, hod, _ticho).read_text(encoding="utf-8")
     assert html.index("PRVEK-CHYBI") < html.index("PRVEK-CASTECNE") < html.index("PRVEK-JE")
 
 
 @pytest.mark.parametrize("skore, ocekavano", [(9.5, "Reference dosáhla cílového skóre"),
                                               (7.5, "Reference nedosáhla cílového skóre")])
-def test_kalibrace_veta_o_cilovem_skore(tmp_path, zdroje, skore, ocekavano):
-    beh, _ = _dokonceny_beh(tmp_path, zdroje)
-    hod = _hodnotitel(porovnani_kalibrace=[hodnoceni(skore, navrhy=0)])
-    html = porovnej(beh, zdroje, REFERENCE, hod, _ticho).read_text(encoding="utf-8")
+def test_kalibrace_veta_o_cilovem_skore(tmp_path, sources, skore, ocekavano):
+    beh, _ = _dokonceny_beh(tmp_path, sources)
+    hod = _hodnotitel(comparison_calibration=[make_evaluation(skore, suggestions=0)])
+    html = porovnej(beh, sources, REFERENCE, hod, _ticho).read_text(encoding="utf-8")
     assert ocekavano in html
 
 
 # ---------------------------------------------------------------- validace a oprava
 
-def test_srovnani_s_chybejicim_kriteriem_se_opravi(tmp_path, zdroje):
-    beh, _ = _dokonceny_beh(tmp_path, zdroje)
-    ids = [x.id for x in kriteria_test(3)]
-    neuplne = Srovnani(kriteria=[k(i, "A") for i in ids[1:]] + [k("X9", "A")])
-    uplne = Srovnani(kriteria=[k(i, "A") for i in ids])
-    hod = _hodnotitel(porovnani_srovnani_1=[neuplne, uplne])
-    porovnej(beh, zdroje, REFERENCE, hod, _ticho)
-    volani = [(krok, z) for krok, _, z in hod.calls if krok == "porovnani_srovnani_1"]
+def test_srovnani_s_chybejicim_kriteriem_se_opravi(tmp_path, sources):
+    beh, _ = _dokonceny_beh(tmp_path, sources)
+    ids = [x.id for x in make_criteria(3)]
+    neuplne = PairComparison(criteria=[k(i, "A") for i in ids[1:]] + [k("X9", "A")])
+    uplne = PairComparison(criteria=[k(i, "A") for i in ids])
+    hod = _hodnotitel(comparison_pair_1=[neuplne, uplne])
+    porovnej(beh, sources, REFERENCE, hod, _ticho)
+    volani = [(krok, z) for krok, _, z in hod.calls if krok == 'comparison_pair_1']
     assert len(volani) == 2
     assert "## Oprava" in volani[1][1] and "N1" in volani[1][1] and "X9" in volani[1][1]
 
 
-def test_srovnani_s_duplicitou_po_oprave_je_chyba_a_spotreba_zustane(tmp_path, zdroje):
-    beh, _ = _dokonceny_beh(tmp_path, zdroje)
-    ids = [x.id for x in kriteria_test(3)]
-    duplicitni = Srovnani(kriteria=[k(i, "A") for i in ids] + [k("N1", "B")])
-    hod = _hodnotitel(porovnani_srovnani_2=[duplicitni, duplicitni])
+def test_srovnani_s_duplicitou_po_oprave_je_chyba_a_spotreba_zustane(tmp_path, sources):
+    beh, _ = _dokonceny_beh(tmp_path, sources)
+    ids = [x.id for x in make_criteria(3)]
+    duplicitni = PairComparison(criteria=[k(i, "A") for i in ids] + [k("N1", "B")])
+    hod = _hodnotitel(comparison_pair_2=[duplicitni, duplicitni])
     with pytest.raises(ModelError) as e:
-        porovnej(beh, zdroje, REFERENCE, hod, _ticho)
+        porovnej(beh, sources, REFERENCE, hod, _ticho)
     assert e.value.kind == 'invalid_output' and "N1" in e.value.detail
-    spotreba = [s.krok for s in Beh.otevri(beh.slozka).stav.spotreba if s.krok.startswith("porovnani")]
-    assert spotreba == KROKY[:2] + ["porovnani_srovnani_2"] * 2
-    assert not (beh.slozka / "porovnani.html").exists()
+    spotreba = [s.step for s in Run.open(beh.directory).state.usage if s.step.startswith("comparison_")]
+    assert spotreba == KROKY[:2] + ['comparison_pair_2'] * 2
+    assert not (beh.directory / "porovnani.html").exists()
 
 
-def test_pokryti_musi_pokryt_kazdy_prvek(tmp_path, zdroje):
-    beh, _ = _dokonceny_beh(tmp_path, zdroje)
-    neuplne = Pokryti(polozky=[PokrytiPrvku(id="P1", stav="je", komentar="x")])
-    hod = _hodnotitel(porovnani_pokryti=[neuplne, _pokryti(("je", "a"), ("je", "b"), ("je", "c"))])
-    porovnej(beh, zdroje, REFERENCE, hod, _ticho)
-    oprava = [z for krok, _, z in hod.calls if krok == "porovnani_pokryti"][1]
+def test_pokryti_musi_pokryt_kazdy_prvek(tmp_path, sources):
+    beh, _ = _dokonceny_beh(tmp_path, sources)
+    neuplne = Coverage(items=[ElementCoverage(id="P1", status='present', comment="x")])
+    hod = _hodnotitel(comparison_coverage=[neuplne, _pokryti(('present', "a"), ('present', "b"), ('present', "c"))])
+    porovnej(beh, sources, REFERENCE, hod, _ticho)
+    oprava = [z for krok, _, z in hod.calls if krok == 'comparison_coverage'][1]
     assert "## Oprava" in oprava and "P2" in oprava and "P3" in oprava
 
 
-@pytest.mark.parametrize("prvky", [SeznamPrvku(prvky=[]),
-                                   SeznamPrvku(prvky=[PrvekReference(id="P1", popis="a"),
-                                                      PrvekReference(id="P1", popis="b")])])
-def test_prvky_prazdne_nebo_duplicitni_se_opravi(tmp_path, zdroje, prvky):
-    beh, _ = _dokonceny_beh(tmp_path, zdroje)
-    hod = _hodnotitel(porovnani_prvky=[prvky, _prvky("a", "b", "c")])
-    porovnej(beh, zdroje, REFERENCE, hod, _ticho)
-    assert [krok for krok, *_ in hod.calls].count("porovnani_prvky") == 2
+@pytest.mark.parametrize('prvky', [ReferenceElements(elements=[]),
+                                   ReferenceElements(elements=[ReferenceElement(id="P1", description="a"),
+                                                      ReferenceElement(id="P1", description="b")])])
+def test_prvky_prazdne_nebo_duplicitni_se_opravi(tmp_path, sources, prvky):
+    beh, _ = _dokonceny_beh(tmp_path, sources)
+    hod = _hodnotitel(comparison_elements=[prvky, _prvky("a", "b", "c")])
+    porovnej(beh, sources, REFERENCE, hod, _ticho)
+    assert [krok for krok, *_ in hod.calls].count('comparison_elements') == 2
 
 
 # ---------------------------------------------------------------- příkazová řádka
 
 @pytest.fixture
-def koren(tmp_path, koren_repa) -> Path:
+def koren(tmp_path, repo_root) -> Path:
     """Kořen aplikace v tmp: konfigurace, prompty, input/poptavka.md a examples/ s referencí."""
     kor = tmp_path / "app"
     kor.mkdir()
-    shutil.copy(koren_repa / "settings.yaml", kor / "settings.yaml")
-    shutil.copytree(koren_repa / "profiles", kor / "profiles")
-    shutil.copytree(koren_repa / "prompty", kor / "prompty")
+    shutil.copy(repo_root / "settings.yaml", kor / "settings.yaml")
+    shutil.copytree(repo_root / "profiles", kor / "profiles")
+    shutil.copytree(repo_root / 'prompts', kor / 'prompts')
     (kor / "input").mkdir()
-    (kor / "input" / "poptavka.md").write_text(POPTAVKA_TEST, encoding="utf-8")
+    (kor / "input" / "poptavka.md").write_text(TEST_REQUEST, encoding="utf-8")
     (kor / "examples").mkdir()
     (kor / "examples" / "reference.md").write_text(REFERENCE, encoding="utf-8")
     return kor
@@ -349,7 +349,7 @@ def _dokonceny_beh_cli(koren: Path, nanecisto: bool = False) -> tuple[Path, Fake
 
 def test_cli_porovnat_ukazkovy_beh_odmitne(koren, monkeypatch):
     slozka, _ = _dokonceny_beh_cli(koren, nanecisto=True)
-    assert Beh.otevri(slozka).stav.nanecisto
+    assert Run.open(slozka).state.dry_run
     monkeypatch.setenv("OPENAI_API_KEY", "test-klic")
     hod = _hodnotitel()
     out = io.StringIO()
@@ -446,7 +446,7 @@ def test_cli_porovnat_bez_dokonceneho_behu(koren, monkeypatch):
 def test_cli_porovnat_nedokonceny_beh_se_slozkou(koren, monkeypatch):
     assert main(["--nanecisto"], koren=koren, vstup_fn=lambda _: "1", vystup=io.StringIO(),
                 tovarna_modelu=lambda konf, nanecisto: (
-                    demo_models()[0], FakeModel({"hodnoceni_1": [ModelError('network', "OpenAI")]}))) == 1
+                    demo_models()[0], FakeModel({'evaluation_1': [ModelError('network', "OpenAI")]}))) == 1
     slozka = next((koren / "output").iterdir())
     monkeypatch.setenv("OPENAI_API_KEY", "test-klic")
     out = io.StringIO()
@@ -458,14 +458,14 @@ def test_cli_porovnat_nedokonceny_beh_se_slozkou(koren, monkeypatch):
 def test_cli_porovnat_chyba_modelu_je_kod_1(koren, monkeypatch):
     slozka, _ = _dokonceny_beh_cli(koren)
     monkeypatch.setenv("OPENAI_API_KEY", "test-klic")
-    hod = _hodnotitel(porovnani_prvky=[ModelError('overloaded', "OpenAI")])
+    hod = _hodnotitel(comparison_elements=[ModelError('overloaded', "OpenAI")])
     out = io.StringIO()
     assert main(["porovnat"], koren=koren, vystup=out,
                 tovarna_modelu=lambda konf, nanecisto: (FakeModel({}), hod)) == 1
     assert "porovnat.bat" in out.getvalue() and "pokracovat.bat" not in out.getvalue()
-    stav = Beh.otevri(slozka).stav
-    assert stav.stav == "dokoncen"
-    assert [s.krok for s in stav.spotreba if s.krok.startswith("porovnani")] == KROKY[:3]
+    stav = Run.open(slozka).state
+    assert stav.status == 'completed'
+    assert [s.step for s in stav.usage if s.step.startswith("comparison_")] == KROKY[:3]
     assert "Chyba modelu při porovnání" in (slozka / "data" / "beh.log").read_text(encoding="utf-8")
 
 
@@ -473,7 +473,7 @@ def test_cli_porovnat_ulozi_surovou_odpoved(koren, monkeypatch):
     slozka, _ = _dokonceny_beh_cli(koren)
     monkeypatch.setenv("OPENAI_API_KEY", "test-klic")
     chyba = ModelError('invalid_output', "OpenAI", detail="x", raw_response="SUROVA-ODPOVED")
-    hod = _hodnotitel(porovnani_kalibrace=[chyba, chyba])   # neplatná i po opravě
+    hod = _hodnotitel(comparison_calibration=[chyba, chyba])   # neplatná i po opravě
     assert main(["porovnat"], koren=koren, vystup=io.StringIO(),
                 tovarna_modelu=lambda konf, nanecisto: (FakeModel({}), hod)) == 1
     surove = list((slozka / "data").glob("surova_odpoved_porovnani_*.txt"))
@@ -486,17 +486,17 @@ def test_cli_porovnat_doplni_prompty_porovnani_do_kopie_behu(koren, monkeypatch)
     kopie = slozka / "data" / "konfigurace" / "prompty"
     for p in kopie.glob("porovnani_*.md"):
         p.unlink()
-    (koren / "prompty" / "porovnani_prvky.md").write_text(
-        (koren / "prompty" / "porovnani_prvky.md").read_text(encoding="utf-8") + "\nUPRAVENY-PROMPT\n",
+    (koren / "prompts" / "comparison_elements.md").write_text(
+        (koren / "prompts" / "comparison_elements.md").read_text(encoding="utf-8") + "\nUPRAVENY-PROMPT\n",
         encoding="utf-8")
     monkeypatch.setenv("OPENAI_API_KEY", "test-klic")
     hod = _hodnotitel()
     assert main(["porovnat"], koren=koren, vystup=io.StringIO(),
                 tovarna_modelu=lambda konf, nanecisto: (FakeModel({}), hod)) == 0
-    assert "UPRAVENY-PROMPT" in dict((krok, i) for krok, i, _ in hod.calls)["porovnani_prvky"]
+    assert "UPRAVENY-PROMPT" in dict((krok, i) for krok, i, _ in hod.calls)['comparison_elements']
     assert "UPRAVENY-PROMPT" in (kopie / "porovnani_prvky.md").read_text(encoding="utf-8")
     # Kalibrace hodnotí stejným promptem jako běh (kopie hodnoceni.md se nepřepisuje).
-    (koren / "prompty" / "hodnoceni.md").write_text("ZMENENY", encoding="utf-8")
+    (koren / "prompts" / "evaluation.md").write_text("ZMENENY", encoding="utf-8")
     hod = _hodnotitel()
     assert main(["porovnat"], koren=koren, vystup=io.StringIO(),
                 tovarna_modelu=lambda konf, nanecisto: (FakeModel({}), hod)) == 0
@@ -510,11 +510,11 @@ def test_cli_porovnat_nanecisto_neni_podporovano(koren):
     assert "--nanecisto" in out.getvalue()
 
 
-def test_kalibrace_v_html_ukazuje_skore_po_kriteriich(tmp_path, zdroje):
-    beh, _ = _dokonceny_beh(tmp_path, zdroje)
-    kal = hodnoceni(7.0, navrhy=0)
-    html = porovnej(beh, zdroje, REFERENCE, _hodnotitel(porovnani_kalibrace=[kal]), _ticho) \
+def test_kalibrace_v_html_ukazuje_skore_po_kriteriich(tmp_path, sources):
+    beh, _ = _dokonceny_beh(tmp_path, sources)
+    kal = make_evaluation(7.0, suggestions=0)
+    html = porovnej(beh, sources, REFERENCE, _hodnotitel(comparison_calibration=[kal]), _ticho) \
         .read_text(encoding="utf-8")
-    finalni = beh.data("hodnoceni_1", Hodnoceni)
-    assert finalni.kriteria[0].skore == 9.5
+    finalni = beh.data('evaluation_1', Evaluation)
+    assert finalni.criteria[0].score == 9.5
     assert "9,5" in html and "7,0" in html

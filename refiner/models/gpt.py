@@ -9,7 +9,7 @@ import openai
 import pydantic
 from pydantic import BaseModel
 
-from refiner.data import Spotreba as TokenUsage
+from refiner.data import TokenUsage
 from refiner.configuration import ModelSettings
 from refiner.models.errors import ModelError, parsing_error, convert_exception
 
@@ -44,8 +44,8 @@ class GptModel:
         u = response.usage
         details = getattr(u, "input_tokens_details", None)
         self._usage.append(TokenUsage(
-            krok=step, model=self.name, vstup=u.input_tokens, vystup=u.output_tokens,
-            cache_cteni=(getattr(details, "cached_tokens", 0) or 0)))
+            step=step, model=self.name, input_tokens=u.input_tokens, output_tokens=u.output_tokens,
+            cache_read_tokens=(getattr(details, "cached_tokens", 0) or 0)))
         if response.status == "incomplete":
             reason = getattr(getattr(response, "incomplete_details", None), "reason", None)
             raise ModelError('truncated', _SERVICE, detail=str(reason or ""))

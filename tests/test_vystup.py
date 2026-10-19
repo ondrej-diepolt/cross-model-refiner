@@ -2,57 +2,57 @@ import subprocess
 
 import pypandoc
 
-from refiner.skore import format_skore, spocitej
+from refiner.scoring import format_score, calculate_score
 from refiner.input import read_as_markdown
 from refiner.vystup.diff import diff_html
 from refiner.vystup.docx import exportuj_docx
 from refiner.vystup.markdown import hodnoceni_md, nalezitosti_md, posouzeni_md
-from refiner.data import Nalezitost
-from tests.pomocne import hodnoceni, kriteria_test, nastaveni_test, posouzeni
+from refiner.data import Requirement
+from tests.helpers import make_evaluation, make_criteria, make_settings, make_review
 
 BS = chr(92)
 
 
 def test_hodnoceni_md_obsahuje_skore_a_duvody():
-    k = kriteria_test()
-    h = hodnoceni(zaklad=9.2, kriteria=k)
-    s = spocitej(h, k, nastaveni_test())
+    k = make_criteria()
+    h = make_evaluation(base=9.2, criteria=k)
+    s = calculate_score(h, k, make_settings())
     md = hodnoceni_md(2, h, s, k)
     assert "Hodnocení 2" in md and "9,2" in md and "B3" in md and "Vnitřní konzistence" in md
-    assert format_skore(s.celkem) in md
+    assert format_score(s.total) in md
 
 
 def test_hodnoceni_md_ukazuje_duvody_nesplneni():
-    k = kriteria_test()
-    h = hodnoceni(zaklad=3.0, kriteria=k, fakta=1)
-    s = spocitej(h, k, nastaveni_test())
+    k = make_criteria()
+    h = make_evaluation(base=3.0, criteria=k, facts=1)
+    s = calculate_score(h, k, make_settings())
     md = hodnoceni_md(1, h, s, k)
-    assert s.duvody_nesplneni and all(d in md for d in s.duvody_nesplneni)
+    assert s.unmet_reasons and all(d in md for d in s.unmet_reasons)
     assert "Fakt 0" in md
 
 
 def test_hodnoceni_md_svislitko_v_textu_nerozbije_tabulku():
-    k = kriteria_test()
-    h = hodnoceni(kriteria=k)
-    h.kriteria[0].zduvodneni = "a | b\nc"
-    md = hodnoceni_md(1, h, spocitej(h, k, nastaveni_test()), k)
+    k = make_criteria()
+    h = make_evaluation(criteria=k)
+    h.criteria[0].rationale = "a | b\nc"
+    md = hodnoceni_md(1, h, calculate_score(h, k, make_settings()), k)
     assert "a " + BS + "| b c" in md
     radek = next(r for r in md.splitlines() if "a " + BS + "| b c" in r)
     assert radek.replace(BS + "|", "").count("|") == 6  # 5 sloupců
 
 
 def test_posouzeni_md_pocty_a_rozhodnuti():
-    h = hodnoceni(navrhy=3)
-    p = posouzeni(h)
-    p.rozhodnuti[2].rozhodnuti = "odmitnuto"
-    p.rozhodnuti[2].zduvodneni = "Odporuje zadání."
+    h = make_evaluation(suggestions=3)
+    p = make_review(h)
+    p.decisions[2].decision = 'rejected'
+    p.decisions[2].rationale = "Odporuje zadání."
     md = posouzeni_md(1, h, p)
     assert "Přijato: 2" in md and "Odmítnuto: 1" in md and "Částečně: 0" in md
     assert "Odporuje zadání." in md and "Takto." in md and "Místo 1" in md
 
 
 def test_nalezitosti_md():
-    md = nalezitosti_md([Nalezitost(id="N1", text="Cena | celá", citace="cena")], ["pozor"])
+    md = nalezitosti_md([Requirement(id="N1", text="Cena | celá", citation="cena")], ["pozor"])
     assert "N1" in md and "Cena " + BS + "| celá" in md and "pozor" in md
 
 

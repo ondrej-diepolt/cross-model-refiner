@@ -5,24 +5,24 @@ from pathlib import Path
 
 import pytest
 
-from refiner.beh import Beh
+from refiner.run import Run
 from refiner.cli import main
-from refiner.kroky import extrahuj_nalezitosti
+from refiner.steps import extract_requirements
 from refiner.models.errors import ModelError
 from refiner.models.fakes import FakeModel, demo_models
-from tests.pomocne import POPTAVKA_TEST
+from tests.helpers import TEST_REQUEST
 
 
 @pytest.fixture
-def koren(tmp_path, koren_repa) -> Path:
+def koren(tmp_path, repo_root) -> Path:
     """Kořen aplikace v tmp (bez .env): settings.yaml, profiles/, prompty/ a input/poptavka.md."""
     k = tmp_path / "app"
     k.mkdir()
-    shutil.copy(koren_repa / "settings.yaml", k / "settings.yaml")
-    shutil.copytree(koren_repa / "profiles", k / "profiles")
-    shutil.copytree(koren_repa / "prompty", k / "prompty")
+    shutil.copy(repo_root / "settings.yaml", k / "settings.yaml")
+    shutil.copytree(repo_root / "profiles", k / "profiles")
+    shutil.copytree(repo_root / 'prompts', k / 'prompts')
     (k / "input").mkdir()
-    (k / "input" / "poptavka.md").write_text(POPTAVKA_TEST, encoding="utf-8")
+    (k / "input" / "poptavka.md").write_text(TEST_REQUEST, encoding="utf-8")
     return k
 
 
@@ -31,10 +31,10 @@ def _odpovedi(*hodnoty: str):
     return lambda _: fronta.pop(0)
 
 
-def _jediny_beh(koren: Path) -> Beh:
+def _jediny_beh(koren: Path) -> Run:
     slozky = list((koren / "output").iterdir())
     assert len(slozky) == 1
-    return Beh.otevri(slozky[0])
+    return Run.open(slozky[0])
 
 
 class _NecekanyDotaz(BaseException):
@@ -58,12 +58,12 @@ def test_nanecisto_cely_beh(koren):
 def test_nanecisto_projde_celou_smyckou_s_rostoucim_skore(koren):
     assert main(["--nanecisto"], koren=koren, vstup_fn=lambda _: "1", vystup=io.StringIO()) == 0
     beh = _jediny_beh(koren)
-    assert beh.stav.stav == "dokoncen"
-    assert [beh.stav.skore[str(k)].celkem for k in range(1, 5)] == [7.9, 8.7, 9.2, 9.6]
-    assert beh.stav.duvod_ukonceni == "cil_splnen"
-    posouzeni = (beh.slozka / "05_posouzeni_1.md").read_text(encoding="utf-8")
-    assert "odmít" in posouzeni.lower()
-    finalni = (beh.slozka / "FINALNI_nabidka.md").read_text(encoding="utf-8")
+    assert beh.state.status == 'completed'
+    assert [beh.state.scores[str(k)].total for k in range(1, 5)] == [7.9, 8.7, 9.2, 9.6]
+    assert beh.state.stop_reason == 'target_reached'
+    make_review = (beh.directory / "05_posouzeni_1.md").read_text(encoding="utf-8")
+    assert "odmít" in make_review.lower()
+    finalni = (beh.directory / "FINALNI_nabidka.md").read_text(encoding="utf-8")
     assert "[DOPLNIT:" in finalni
 
 
@@ -71,15 +71,15 @@ def test_nanecisto_poptavka_bez_odrazek(koren):
     (koren / "input" / "poptavka.md").write_text(
         "Poptáváme zpracování analýzy rizik.\n\nTermín dodání je do konce roku.\n", encoding="utf-8")
     assert main(["--nanecisto"], koren=koren, vstup_fn=lambda _: "1", vystup=io.StringIO()) == 0
-    assert _jediny_beh(koren).stav.stav == "dokoncen"
+    assert _jediny_beh(koren).state.status == 'completed'
 
 
-def test_demo_modely_nalezitosti_cituji_odrazky_poptavky(zdroje):
+def test_demo_modely_nalezitosti_cituji_odrazky_poptavky(sources):
     pisatel, hodnotitel = demo_models()
     assert hodnotitel.name.startswith("gpt") and not pisatel.name.startswith("gpt")
-    nalezitosti, varovani = extrahuj_nalezitosti(pisatel, zdroje)
+    nalezitosti, varovani = extract_requirements(pisatel, sources)
     assert varovani == []
-    assert [n.citace for n in nalezitosti] == [
+    assert [n.citation for n in nalezitosti] == [
         "popis metodiky cvičení", "harmonogram a hlavní milníky realizace", "cenu za celé plnění"]
     assert [n.id for n in nalezitosti] == ["N1", "N2", "N3"]
 
@@ -164,15 +164,15 @@ def test_porovnat_v_rezimu_api_kontroluje_jen_openai(koren):
     assert "OPENAI_API_KEY" in out.getvalue() and "ANTHROPIC_API_KEY" not in out.getvalue()
 
 
-def _konfigurace_s_rezimem(zdroje, rezim):
-    nastaveni = zdroje.konfigurace.settings
+def _konfigurace_s_rezimem(sources, rezim):
+    nastaveni = sources.configuration.settings
     modely = nastaveni.models.model_copy(update={"mode": rezim})
-    return zdroje.konfigurace.__class__(
-        nastaveni.model_copy(update={"models": modely}), zdroje.konfigurace.profile,
-        zdroje.konfigurace.profile_id, zdroje.konfigurace.profile_criteria, zdroje.konfigurace.output_profile_name)
+    return sources.configuration.__class__(
+        nastaveni.model_copy(update={"models": modely}), sources.configuration.profile,
+        sources.configuration.profile_id, sources.configuration.profile_criteria, sources.configuration.output_profile_name)
 
 
-def test_vychozi_tovarna_podle_rezimu(zdroje, monkeypatch):
+def test_vychozi_tovarna_podle_rezimu(sources, monkeypatch):
     import refiner.cli as cli
 
     for nazev in ("ClaudeCliModel", "CodexModel", "ClaudeModel", "GptModel"):
@@ -181,8 +181,8 @@ def test_vychozi_tovarna_podle_rezimu(zdroje, monkeypatch):
     def typy(dvojice):
         return tuple(type(m).__name__ for m in dvojice)
 
-    predplatne = _konfigurace_s_rezimem(zdroje, "subscription")
-    api = _konfigurace_s_rezimem(zdroje, "api")
+    predplatne = _konfigurace_s_rezimem(sources, "subscription")
+    api = _konfigurace_s_rezimem(sources, "api")
     assert typy(cli._vychozi_tovarna(predplatne, False)) == ("ClaudeCliModel", "CodexModel")
     assert typy(cli._vychozi_tovarna(api, False)) == ("ClaudeModel", "GptModel")
     assert type(cli._vychozi_hodnotitel(predplatne)).__name__ == "CodexModel"
@@ -229,7 +229,7 @@ def test_env_v_jinem_kodovani_je_kod_2(koren, kodovani):
 
 def test_nepouzivat_neni_spolknuto(koren):
     """Pojistka testů: nečekaný dotaz na vstup se nesmí ztratit v obecném zachycení chyb."""
-    (koren / "input" / "druha.md").write_text(POPTAVKA_TEST, encoding="utf-8")
+    (koren / "input" / "druha.md").write_text(TEST_REQUEST, encoding="utf-8")
     with pytest.raises(_NecekanyDotaz):
         main(["--nanecisto"], koren=koren, vstup_fn=_nepouzivat, vystup=io.StringIO())
 
@@ -244,11 +244,11 @@ def test_prazdny_input(koren):
 def test_vyber_z_vice_souboru(koren):
     (koren / "input" / "poptavka.md").rename(koren / "input" / "a_jina.md")
     (koren / "input" / "a_jina.md").write_text("# Jiná\n\n- jiný požadavek\n", encoding="utf-8")
-    (koren / "input" / "b_poptavka.md").write_text(POPTAVKA_TEST, encoding="utf-8")
+    (koren / "input" / "b_poptavka.md").write_text(TEST_REQUEST, encoding="utf-8")
     out = io.StringIO()
     # "9" je neplatná volba souboru → zopakuje se; "2" = b_poptavka.md; "1" = profil Nabídka.
     assert main(["--nanecisto"], koren=koren, vstup_fn=_odpovedi("9", "2", "1"), vystup=out) == 0
-    assert _jediny_beh(koren).stav.vstup == "b_poptavka.md"
+    assert _jediny_beh(koren).state.input == "b_poptavka.md"
     assert "1) a_jina.md" in out.getvalue() and "2) b_poptavka.md" in out.getvalue()
     assert "Neplatná volba" in out.getvalue()
 
@@ -257,15 +257,15 @@ def test_vyber_profilu(koren):
     out = io.StringIO()
     assert main(["--nanecisto"], koren=koren, vstup_fn=lambda _: "2", vystup=out) == 0
     beh = _jediny_beh(koren)
-    assert beh.stav.profil == "smernice"
+    assert beh.state.output_profile_name == "smernice"
     assert "Nabídka, nebo směrnice?" in out.getvalue()
-    assert (beh.slozka / "FINALNI_smernice.docx").exists()
+    assert (beh.directory / "FINALNI_smernice.docx").exists()
 
 
 def test_jeden_profil_se_nepta(koren):
     (koren / "profiles" / "policy.yaml").unlink()
     assert main(["--nanecisto"], koren=koren, vstup_fn=_nepouzivat, vystup=io.StringIO()) == 0
-    assert _jediny_beh(koren).stav.profil == "nabidka"
+    assert _jediny_beh(koren).state.output_profile_name == "nabidka"
 
 
 def test_konec_vstupu_pri_vyberu_je_kod_2(koren):
@@ -296,7 +296,7 @@ def test_prazdna_poptavka_je_kod_2(koren):
 
 def _tovarna_selze_v_hodnoceni_1(konf, nanecisto):
     pisatel, _ = demo_models()
-    return pisatel, FakeModel({"hodnoceni_1": [ModelError('network', "OpenAI")]}, name="gpt-falesny")
+    return pisatel, FakeModel({'evaluation_1': [ModelError('network', "OpenAI")]}, name="gpt-falesny")
 
 
 def test_pokracovat_bez_hodnoty_najde_posledni(koren, monkeypatch):
@@ -306,7 +306,7 @@ def test_pokracovat_bez_hodnoty_najde_posledni(koren, monkeypatch):
     assert main([], koren=koren, vstup_fn=lambda _: "1", vystup=out,
                 tovarna_modelu=_tovarna_selze_v_hodnoceni_1) == 1
     assert "pokracovat.bat" in out.getvalue()
-    assert _jediny_beh(koren).stav.stav == "prerusen"
+    assert _jediny_beh(koren).state.status == 'interrupted'
 
     modely = []
 
@@ -317,9 +317,9 @@ def test_pokracovat_bez_hodnoty_najde_posledni(koren, monkeypatch):
     assert main(["--pokracovat"], koren=koren, vstup_fn=_nepouzivat, vystup=io.StringIO(),
                 tovarna_modelu=tovarna) == 0
     beh = _jediny_beh(koren)
-    assert beh.stav.stav == "dokoncen"
+    assert beh.state.status == 'completed'
     pisatel = modely[0][0]
-    assert "nalezitosti" not in [krok for krok, _, _ in pisatel.calls]
+    assert 'requirements' not in [krok for krok, _, _ in pisatel.calls]
 
 
 def test_pokracovat_se_slozkou(koren):
@@ -328,7 +328,7 @@ def test_pokracovat_se_slozkou(koren):
     slozka = next((koren / "output").iterdir())
     assert main(["--nanecisto", "--pokracovat", slozka.name], koren=koren, vstup_fn=_nepouzivat,
                 vystup=io.StringIO()) == 0
-    assert Beh.otevri(slozka).stav.stav == "dokoncen"
+    assert Run.open(slozka).state.status == 'completed'
 
 
 def test_pokracovat_bez_preruseneho_behu(koren):
@@ -353,18 +353,18 @@ def _preruseny_ostry(koren: Path, monkeypatch) -> Path:
     monkeypatch.setenv("OPENAI_API_KEY", "test-klic")
     assert main([], koren=koren, vstup_fn=lambda _: "1", vystup=io.StringIO(),
                 tovarna_modelu=_tovarna_selze_v_hodnoceni_1) == 1
-    return max((koren / "output").iterdir(), key=lambda p: Beh.otevri(p).stav.vytvoreno)
+    return max((koren / "output").iterdir(), key=lambda p: Run.open(p).state.created_at)
 
 
 def _preruseny_ukazkovy(koren: Path) -> Path:
     assert main(["--nanecisto"], koren=koren, vstup_fn=lambda _: "1", vystup=io.StringIO(),
                 tovarna_modelu=_tovarna_selze_v_hodnoceni_1) == 1
-    return max((koren / "output").iterdir(), key=lambda p: Beh.otevri(p).stav.vytvoreno)
+    return max((koren / "output").iterdir(), key=lambda p: Run.open(p).state.created_at)
 
 
 def test_rezim_behu_se_ulozi(koren, monkeypatch):
-    assert Beh.otevri(_preruseny_ukazkovy(koren)).stav.nanecisto is True
-    assert Beh.otevri(_preruseny_ostry(koren, monkeypatch)).stav.nanecisto is False
+    assert Run.open(_preruseny_ukazkovy(koren)).state.dry_run is True
+    assert Run.open(_preruseny_ostry(koren, monkeypatch)).state.dry_run is False
 
 
 def test_pokracovat_ostre_v_ukazkovem_behu_je_kod_2(koren, monkeypatch):
@@ -375,7 +375,7 @@ def test_pokracovat_ostre_v_ukazkovem_behu_je_kod_2(koren, monkeypatch):
     assert main(["--pokracovat", slozka.name], koren=koren, vstup_fn=_nepouzivat, vystup=out,
                 tovarna_modelu=lambda konf, n: demo_models()) == 2
     assert "ukázkový" in out.getvalue() and "--nanecisto" in out.getvalue()
-    assert Beh.otevri(slozka).stav.stav == "prerusen"
+    assert Run.open(slozka).state.status == 'interrupted'
 
 
 def test_pokracovat_nanecisto_v_ostrem_behu_je_kod_2(koren, monkeypatch):
@@ -384,7 +384,7 @@ def test_pokracovat_nanecisto_v_ostrem_behu_je_kod_2(koren, monkeypatch):
     assert main(["--nanecisto", "--pokracovat", str(slozka)], koren=koren, vstup_fn=_nepouzivat,
                 vystup=out) == 2
     assert "ostrý" in out.getvalue()
-    assert Beh.otevri(slozka).stav.stav == "prerusen"
+    assert Run.open(slozka).state.status == 'interrupted'
 
 
 def test_pokracovat_bez_hodnoty_preskoci_beh_jineho_rezimu(koren, monkeypatch):
@@ -392,11 +392,11 @@ def test_pokracovat_bez_hodnoty_preskoci_beh_jineho_rezimu(koren, monkeypatch):
     ukazkovy = _preruseny_ukazkovy(koren)   # novější
     assert main(["--pokracovat"], koren=koren, vstup_fn=_nepouzivat, vystup=io.StringIO(),
                 tovarna_modelu=lambda konf, n: demo_models()) == 0
-    assert Beh.otevri(ostry).stav.stav == "dokoncen"
-    assert Beh.otevri(ukazkovy).stav.stav == "prerusen"
+    assert Run.open(ostry).state.status == 'completed'
+    assert Run.open(ukazkovy).state.status == 'interrupted'
     assert main(["--nanecisto", "--pokracovat"], koren=koren, vstup_fn=_nepouzivat,
                 vystup=io.StringIO()) == 0
-    assert Beh.otevri(ukazkovy).stav.stav == "dokoncen"
+    assert Run.open(ukazkovy).state.status == 'completed'
 
 
 def test_pokracovat_bez_hodnoty_jen_beh_jineho_rezimu_je_kod_2(koren):

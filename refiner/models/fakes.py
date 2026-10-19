@@ -4,7 +4,7 @@ from typing import TypeVar
 
 from pydantic import BaseModel
 
-from refiner.data import Spotreba as TokenUsage
+from refiner.data import TokenUsage
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -27,7 +27,7 @@ class FakeModel:
         response = queue.pop(0)
         if isinstance(response, BaseException):
             raise response
-        self._usage.append(TokenUsage(krok=step, model=self.name, vstup=1000, vystup=500))
+        self._usage.append(TokenUsage(step=step, model=self.name, input_tokens=1000, output_tokens=500))
         if callable(response) and not isinstance(response, BaseModel):
             response = response(instructions, task)
         return response
@@ -61,8 +61,8 @@ class FakeModel:
 DEMO_SCORES = (7.5, 8.5, 9.0, 9.5)   # all criterion scores in evaluations 1, 2, 3, 4 (and later)
 _DEMO_STOCK = 50                    # responses per step, with room for retries and higher revision limits
 _DEMO_NOTE = "Ukázka režimu --nanecisto (falešné modely, bez volání API a bez nákladů)."
-_DEMO_DECISIONS = ("prijato", "castecne", "odmitnuto")
-_DEMO_PRIORITY = ("vysoka", "stredni", "nizka")
+_DEMO_DECISIONS = ('accepted', 'partial', 'rejected')
+_DEMO_PRIORITY = ('high', 'medium', 'low')
 
 _REQUEST_RE = re.compile(r"<poptavka>\n?(.*?)\n?</poptavka>", re.S)
 _BULLET_RE = re.compile(r"^\s*(?:[-*+•]|\d+[.)])\s+(.*\S)\s*$")
@@ -101,8 +101,8 @@ def _demo_requirements(instructions: str, task: str) -> dict:
     for i, c in enumerate(_demo_citations(instructions), start=1):
         words = c.split()
         name = " ".join(words[:8]) + (" …" if len(words) > 8 else "")
-        requirements.append({"id": f"N{i}", "text": name[:1].upper() + name[1:], "citace": c})
-    return {"nalezitosti": requirements}
+        requirements.append({"id": f"N{i}", "text": name[:1].upper() + name[1:], 'citation': c})
+    return {'requirements': requirements}
 
 
 def _demo_draft(instructions: str, task: str) -> str:
@@ -136,20 +136,20 @@ def _demo_evaluation(score: float) -> Callable[[str, str], dict]:
     def response(instructions: str, task: str) -> dict:
         ids = _unique(_CRITERION_RE.findall(instructions))
         suggestions = [
-            {"id": f"U{j}", "kriterium": ids[(j - 1) % len(ids)] if ids else "N1",
-             "misto": f"Kapitola {j + 1}", "problem": "Ukázkový problém, který by našel hodnotitel.",
-             "navrh": "Doplnit konkrétní odstavec s popisem řešení.",
-             "priorita": _DEMO_PRIORITY[(j - 1) % 3]}
+            {"id": f"U{j}", 'criterion': ids[(j - 1) % len(ids)] if ids else "N1",
+             'location': f"Kapitola {j + 1}", "problem": "Ukázkový problém, který by našel hodnotitel.",
+             'suggestion': "Doplnit konkrétní odstavec s popisem řešení.",
+             'priority': _DEMO_PRIORITY[(j - 1) % 3]}
             for j in range(1, 4)
         ]
         return {
-            "kriteria": [{"id": i, "skore": score, "zduvodneni": _DEMO_NOTE, "dukaz": "chybí"}
+            'criteria': [{"id": i, 'score': score, 'rationale': _DEMO_NOTE, 'evidence': "chybí"}
                          for i in ids],
-            "vymyslena_fakta": [],
-            "tvrzeni_k_overeni": [{"citace": "v souladu s GDPR",
-                                   "proc": "Ukázka položky k ověření – v režimu --nanecisto se nic neověřuje."}],
-            "navrhy": suggestions,
-            "celkovy_komentar": f"{_DEMO_NOTE} Všechna kritéria mají skóre {_number(score)}.",
+            'fabricated_facts': [],
+            'claims_to_verify': [{'citation': "v souladu s GDPR",
+                                   'reason': "Ukázka položky k ověření – v režimu --nanecisto se nic neověřuje."}],
+            'suggestions': suggestions,
+            'overall_comment': f"{_DEMO_NOTE} Všechna kritéria mají skóre {_number(score)}.",
         }
     return response
 
@@ -159,13 +159,13 @@ def _demo_review(instructions: str, task: str) -> dict:
     for j, id_ in enumerate(_unique(_SUGGESTION_RE.findall(task))):
         r = _DEMO_DECISIONS[j % 3]
         decisions.append({
-            "id_navrhu": id_, "opora": "žádná", "predpoklad": "Ukázkový předpoklad.",
-            "dusledek": "Bez vlivu na konzistenci dokumentu.", "rozhodnuti": r,
-            "zduvodneni": ("Ukázka odmítnutí: návrh by rozšířil plnění nad rámec poptávky."
-                           if r == "odmitnuto" else "Návrh dokument zlepší."),
-            "jak_zapracovat": "–" if r == "odmitnuto" else "Doplnit ukázkový odstavec na konec dokumentu.",
+            'suggestion_id': id_, 'support': "žádná", 'assumption': "Ukázkový předpoklad.",
+            'consequence': "Bez vlivu na konzistenci dokumentu.", 'decision': r,
+            'rationale': ("Ukázka odmítnutí: návrh by rozšířil plnění nad rámec poptávky."
+                           if r == 'rejected' else "Návrh dokument zlepší."),
+            'implementation': "–" if r == 'rejected' else "Doplnit ukázkový odstavec na konec dokumentu.",
         })
-    return {"rozhodnuti": decisions, "shrnuti": _DEMO_NOTE}
+    return {'decisions': decisions, 'summary': _DEMO_NOTE}
 
 
 def _demo_revision(instructions: str, task: str) -> str:
@@ -181,13 +181,13 @@ def demo_models() -> tuple[FakeModel, FakeModel]:
     validations. Scores follow DEMO_SCORES; some suggestions are rejected."""
     n = _DEMO_STOCK
     writer = FakeModel({
-        "nalezitosti": [_demo_requirements] * n,
-        "navrh_1": [_demo_draft] * n,
-        "posouzeni": [_demo_review] * n,
-        "navrh": [_demo_revision] * n,
+        'requirements': [_demo_requirements] * n,
+        'draft_1': [_demo_draft] * n,
+        'review': [_demo_review] * n,
+        'draft': [_demo_revision] * n,
     }, name="claude-nanecisto")
     evaluator_responses: dict[str, list[Response]] = {
-        f"hodnoceni_{k}": [_demo_evaluation(s)] * n for k, s in enumerate(DEMO_SCORES, start=1)
+        f"evaluation_{k}": [_demo_evaluation(s)] * n for k, s in enumerate(DEMO_SCORES, start=1)
     }
-    evaluator_responses["hodnoceni"] = [_demo_evaluation(DEMO_SCORES[-1])] * n
+    evaluator_responses['evaluation'] = [_demo_evaluation(DEMO_SCORES[-1])] * n
     return writer, FakeModel(evaluator_responses, name="gpt-nanecisto")

@@ -7,11 +7,11 @@ from pathlib import Path
 from jinja2 import Environment, FileSystemLoader
 
 from refiner.artifacts import MATERIALS_FILE, OVERVIEW_FILE
-from refiner.beh import Beh
-from refiner.data import Hodnoceni, Posouzeni, Spotreba, VystupNalezitosti, sestav_kriteria
+from refiner.run import Run
+from refiner.data import Evaluation, SuggestionReview, TokenUsage, RequirementsOutput, build_criteria
 from refiner.facts import find_placeholders, find_suspicious_facts
 from refiner.configuration import Configuration
-from refiner.skore import format_skore
+from refiner.scoring import format_score
 
 _SABLONY = Path(__file__).parent / "sablony"
 
@@ -19,7 +19,7 @@ _DRUHY = {
     "amount": "Částky", "company_id": "IČO", "email": "E-maily", "phone": "Telefony",
     "name": "Jména", "url": "Odkazy",
 }
-_NAZVY_KROKU = {"poptavka": "Poptávka", "nalezitosti": "Náležitosti z poptávky"}
+_NAZVY_KROKU = {'request': "Poptávka", 'requirements': "Náležitosti z poptávky"}
 
 
 def _trida_skore(x: float) -> str:
@@ -37,55 +37,55 @@ def _desetinne(x: float) -> str:
 def _popis_kroku(klic: str) -> str:
     if klic in _NAZVY_KROKU:
         return _NAZVY_KROKU[klic]
-    m = re.fullmatch(r"(navrh|hodnoceni|posouzeni)_(\d+)", klic)
+    m = re.fullmatch(r"(draft|evaluation|review)_(\d+)", klic)
     if not m:
         return klic
     druh, n = m.group(1), m.group(2)
-    return {"navrh": f"Návrh, verze {n}", "hodnoceni": f"Hodnocení {n}", "posouzeni": f"Posouzení {n}"}[druh]
+    return {'draft': f"Návrh, verze {n}", 'evaluation': f"Hodnocení {n}", 'review': f"Posouzení {n}"}[druh]
 
 
-def _doba(beh: Beh) -> str:
-    konec = beh.stav.ukonceno
+def _doba(beh: Run) -> str:
+    konec = beh.state.ended_at
     if konec is None:
         return "neukončeno"
-    sekundy = max(0, int((konec - beh.stav.vytvoreno).total_seconds()))
+    sekundy = max(0, int((konec - beh.state.created_at).total_seconds()))
     minut, s = divmod(sekundy, 60)
     return f"{minut} min {s} s"
 
 
-def _nacti_hodnoceni(beh: Beh) -> dict[int, Hodnoceni]:
-    vysledek: dict[int, Hodnoceni] = {}
-    for klic, z in beh.stav.kroky.items():
-        m = re.fullmatch(r"hodnoceni_(\d+)", klic)
+def _nacti_hodnoceni(beh: Run) -> dict[int, Evaluation]:
+    vysledek: dict[int, Evaluation] = {}
+    for klic, z in beh.state.steps.items():
+        m = re.fullmatch(r"evaluation_(\d+)", klic)
         if m and z.data:
-            vysledek[int(m.group(1))] = beh.data(klic, Hodnoceni)
+            vysledek[int(m.group(1))] = beh.data(klic, Evaluation)
     return dict(sorted(vysledek.items()))
 
 
-def _nacti_posouzeni(beh: Beh) -> dict[int, Posouzeni]:
-    vysledek: dict[int, Posouzeni] = {}
-    for klic, z in beh.stav.kroky.items():
-        m = re.fullmatch(r"posouzeni_(\d+)", klic)
+def _nacti_posouzeni(beh: Run) -> dict[int, SuggestionReview]:
+    vysledek: dict[int, SuggestionReview] = {}
+    for klic, z in beh.state.steps.items():
+        m = re.fullmatch(r"review_(\d+)", klic)
         if m and z.data:
-            vysledek[int(m.group(1))] = beh.data(klic, Posouzeni)
+            vysledek[int(m.group(1))] = beh.data(klic, SuggestionReview)
     return vysledek
 
 
 def _bunka(hodnota: float | None, titulek: str = "") -> dict:
     if hodnota is None:
         return {"text": "–", "trida": "", "titulek": titulek}
-    return {"text": format_skore(hodnota), "trida": _trida_skore(hodnota), "titulek": titulek}
+    return {"text": format_score(hodnota), "trida": _trida_skore(hodnota), "titulek": titulek}
 
 
-def _tabulka(beh: Beh, konf: Configuration, hodnoceni: dict[int, Hodnoceni], cisla: list[int]) -> list[dict]:
+def _tabulka(beh: Run, konf: Configuration, evaluations: dict[int, Evaluation], cisla: list[int]) -> list[dict]:
     """Řádky tabulky skóre; vše se hledá podle čísla hodnocení (ID se v kolech opakují)."""
     if not cisla:
         return []
     kriteria = []
-    if beh.hotovo("nalezitosti") and beh.stav.kroky["nalezitosti"].data:
-        kriteria = sestav_kriteria(beh.data("nalezitosti", VystupNalezitosti).nalezitosti,
+    if beh.is_done('requirements') and beh.state.steps['requirements'].data:
+        kriteria = build_criteria(beh.data('requirements', RequirementsOutput).requirements,
                                    konf.profile_criteria)
-    skore = beh.stav.skore
+    skore = beh.state.scores
 
     def ze_skore(atribut: str) -> list[dict]:
         return [_bunka(getattr(skore[str(c)], atribut) if str(c) in skore else None) for c in cisla]
@@ -93,18 +93,18 @@ def _tabulka(beh: Beh, konf: Configuration, hodnoceni: dict[int, Hodnoceni], cis
     radky: list[dict] = []
     for skupina, atribut, nazev in (("A", "a", "Skupina A – průměr náležitostí"),
                                     ("B", "b", "Skupina B – vážený průměr")):
-        for k in (x for x in kriteria if x.skupina == skupina):
+        for k in (x for x in kriteria if x.group == skupina):
             bunky = []
             for c in cisla:
-                h = hodnoceni.get(c)
-                s = next((x for x in h.kriteria if x.id == k.id), None) if h else None
-                bunky.append(_bunka(s.skore if s else None, s.zduvodneni if s else ""))
-            radky.append({"typ": "kriterium", "id": k.id, "nazev": k.nazev, "bunky": bunky})
+                h = evaluations.get(c)
+                s = next((x for x in h.criteria if x.id == k.id), None) if h else None
+                bunky.append(_bunka(s.score if s else None, s.rationale if s else ""))
+            radky.append({"typ": "kriterium", "id": k.id, "nazev": k.name, "bunky": bunky})
         if kriteria:
             radky.append({"typ": "souhrn", "id": skupina, "nazev": nazev, "bunky": ze_skore(atribut)})
     radky.append({"typ": "souhrn", "id": "C", "nazev": "Skupina C – bez vymyšlených faktů",
                   "bunky": ze_skore("c")})
-    radky.append({"typ": "celkem", "id": "", "nazev": "Celkem", "bunky": ze_skore("celkem")})
+    radky.append({"typ": "celkem", "id": "", "nazev": "Celkem", "bunky": ze_skore("total")})
     return radky
 
 
@@ -122,19 +122,19 @@ def _je_openai(model: str) -> bool:
     return model.lower().startswith("gpt")
 
 
-def _cena(spotreba: list[Spotreba], konf: Configuration) -> dict:
+def _cena(spotreba: list[TokenUsage], konf: Configuration) -> dict:
     """Souhrn po modelech; `vstup` v řádcích je vždy vstup bez tokenů z cache (u obou služeb)."""
     ceny = konf.settings.prices_usd_per_million
     souhrn: dict[tuple[str, bool], dict] = {}
     for s in spotreba:
-        r = souhrn.setdefault((s.model, s.predplatne), {
-            "model": s.model, "predplatne": s.predplatne, "vstup": 0, "vystup": 0,
+        r = souhrn.setdefault((s.model, s.subscription), {
+            "model": s.model, "predplatne": s.subscription, "vstup": 0, "vystup": 0,
             "cache_cteni": 0, "cache_zapis": 0})
         # OpenAI počítá tokeny z cache do vstupu; Anthropic ne.
-        r["vstup"] += s.vstup - s.cache_cteni if _je_openai(s.model) else s.vstup
-        r["vystup"] += s.vystup
-        r["cache_cteni"] += s.cache_cteni
-        r["cache_zapis"] += s.cache_zapis
+        r["vstup"] += s.input_tokens - s.cache_read_tokens if _je_openai(s.model) else s.input_tokens
+        r["vystup"] += s.output_tokens
+        r["cache_cteni"] += s.cache_read_tokens
+        r["cache_zapis"] += s.cache_write_tokens
     celkem = 0.0
     neznama = False
     radky = []
@@ -163,106 +163,106 @@ def _cena(spotreba: list[Spotreba], konf: Configuration) -> dict:
     }
 
 
-def _kroky(beh: Beh) -> list[dict]:
+def _kroky(beh: Run) -> list[dict]:
     """Časová osa; odkazy vznikají jen z názvů souborů zapsaných kroků."""
     vysledek = []
-    for klic, z in sorted(beh.stav.kroky.items(), key=lambda kv: kv[1].cislo):
-        odkazy = [{"soubor": z.soubor, "popis": z.soubor}]
-        if re.fullmatch(r"navrh_([2-9]|\d{2,})", klic):
-            zmeny = f"{Path(z.soubor).stem}_zmeny.html"
-            if (beh.slozka / zmeny).exists():
+    for klic, z in sorted(beh.state.steps.items(), key=lambda kv: kv[1].number):
+        odkazy = [{"soubor": z.file, "popis": z.file}]
+        if re.fullmatch(r"draft_([2-9]|\d{2,})", klic):
+            zmeny = f"{Path(z.file).stem}_zmeny.html"
+            if (beh.directory / zmeny).exists():
                 odkazy.append({"soubor": zmeny, "popis": "změny proti předchozí verzi"})
-        vysledek.append({"cislo": z.cislo, "popis": _popis_kroku(klic), "odkazy": odkazy})
+        vysledek.append({"cislo": z.number, "popis": _popis_kroku(klic), "odkazy": odkazy})
     return vysledek
 
 
-def vytvor_prehled(beh: Beh, konfigurace: Configuration) -> Path:
-    stav = beh.stav
-    hodnoceni = _nacti_hodnoceni(beh)
-    posouzeni = _nacti_posouzeni(beh)
-    skore = {int(k): v for k, v in stav.skore.items()}
-    cisla = sorted(set(hodnoceni) | set(skore))
+def vytvor_prehled(beh: Run, konfigurace: Configuration) -> Path:
+    stav = beh.state
+    evaluations = _nacti_hodnoceni(beh)
+    reviews = _nacti_posouzeni(beh)
+    skore = {int(k): v for k, v in stav.scores.items()}
+    cisla = sorted(set(evaluations) | set(skore))
     nastaveni = konfigurace.settings
 
-    finalni = stav.finalni_verze if stav.stav == "dokoncen" else None
+    finalni = stav.final_version if stav.status == 'completed' else None
     fin_skore = skore.get(finalni) if finalni is not None else None
     posledni = cisla[-1] if cisla else None
 
     duvod = None
-    if stav.stav == "dokoncen":
-        if stav.duvod_ukonceni == "cil_splnen":
-            cil = format_skore(nastaveni.loop.target_score)
-            duvod = f"Cíl splněn (skóre {format_skore(fin_skore.celkem) if fin_skore else '?'} ≥ {cil})"
-        elif stav.duvod_ukonceni == "limit_revizi":
+    if stav.status == 'completed':
+        if stav.stop_reason == 'target_reached':
+            cil = format_score(nastaveni.loop.target_score)
+            duvod = f"Cíl splněn (skóre {format_score(fin_skore.total) if fin_skore else '?'} ≥ {cil})"
+        elif stav.stop_reason == 'revision_limit':
             duvod = f"Vyčerpán limit {nastaveni.loop.max_revisions} revizí"
-        elif stav.duvod_ukonceni == "zadna_zmena":
+        elif stav.stop_reason == 'no_changes':
             duvod = "Hodnotitel nenavrhl nic, co by prošlo posouzením"
         else:
-            duvod = stav.duvod_ukonceni or "Běh skončil"
+            duvod = stav.stop_reason or "Běh skončil"
 
     vysvetleni = None
     if finalni is not None and fin_skore and posledni is not None and finalni != posledni \
             and posledni in skore:
         # Pořadí výběru (skore.vyber_finalni): splněný cíl, pak nejvyšší skóre, pak pozdější verze.
-        if fin_skore.cil_splnen and not skore[posledni].cil_splnen:
+        if fin_skore.target_met and not skore[posledni].target_met:
             vysvetleni = (
                 f"Finální je verze {finalni}, ne poslední verze {posledni}: verze {finalni} splnila cíl, "
-                f"verze {posledni} ne ({'; '.join(skore[posledni].duvody_nesplneni)})."
+                f"verze {posledni} ne ({'; '.join(skore[posledni].unmet_reasons)})."
             )
         else:
             vysvetleni = (
                 f"Finální je verze {finalni}, ne poslední verze {posledni}: verze {finalni} má vyšší "
-                f"skóre ({format_skore(fin_skore.celkem)}) než verze {posledni} "
-                f"({format_skore(skore[posledni].celkem)})."
+                f"skóre ({format_score(fin_skore.total)}) než verze {posledni} "
+                f"({format_score(skore[posledni].total)})."
             )
 
     placeholdery: list[str] = []
     podezrele: list[dict] = []
     tvrzeni: list = []
     if finalni is not None:
-        klic = f"navrh_{finalni}"
-        if beh.hotovo(klic) and (beh.slozka / beh.stav.kroky[klic].soubor).exists():
+        klic = f"draft_{finalni}"
+        if beh.is_done(klic) and (beh.directory / beh.state.steps[klic].file).exists():
             dokument = beh.text(klic)
             placeholdery = find_placeholders(dokument)
-            zdroje = beh.text("poptavka") if beh.hotovo("poptavka") else ""
-            podklady = beh.slozka / "data" / "podklady.md"
+            sources = beh.text('request') if beh.is_done('request') else ""
+            podklady = beh.directory / "data" / "podklady.md"
             if podklady.exists():
-                zdroje += "\n" + podklady.read_text(encoding="utf-8")
+                sources += "\n" + podklady.read_text(encoding="utf-8")
             skupiny: dict[str, list[str]] = {}
-            for u in find_suspicious_facts(dokument, zdroje):
+            for u in find_suspicious_facts(dokument, sources):
                 skupiny.setdefault(u.kind, []).append(u.value)
             podezrele = [{"druh": _DRUHY[d], "hodnoty": v} for d, v in skupiny.items()]
-        if finalni in hodnoceni:
-            tvrzeni = hodnoceni[finalni].tvrzeni_k_overeni
+        if finalni in evaluations:
+            tvrzeni = evaluations[finalni].claims_to_verify
 
     # Statistika návrhů po kolech: ID návrhů se opakují v každém kole.
     kola = []
-    soucet = {"navrhu": 0, "prijato": 0, "castecne": 0, "odmitnuto": 0}
-    for c, h in hodnoceni.items():
-        p = posouzeni.get(c)
-        radek = {"kolo": c, "navrhu": len(h.navrhy), "prijato": 0, "castecne": 0, "odmitnuto": 0,
+    soucet = {"navrhu": 0, 'accepted': 0, 'partial': 0, 'rejected': 0}
+    for c, h in evaluations.items():
+        p = reviews.get(c)
+        radek = {"kolo": c, "navrhu": len(h.suggestions), 'accepted': 0, 'partial': 0, 'rejected': 0,
                  "posouzeno": p is not None}
         if p:
-            for r in p.rozhodnuti:
-                radek[r.rozhodnuti] += 1
+            for r in p.decisions:
+                radek[r.decision] += 1
         for k in soucet:
             soucet[k] += radek[k]
         kola.append(radek)
 
     nazev_finalu = f"FINALNI_{konfigurace.output_profile_name}"
     soubory = [{"soubor": f"{nazev_finalu}{pripona}",
-                "existuje": (beh.slozka / f"{nazev_finalu}{pripona}").exists()}
+                "existuje": (beh.directory / f"{nazev_finalu}{pripona}").exists()}
                for pripona in (".docx", ".md")]
 
     env = Environment(loader=FileSystemLoader(_SABLONY), autoescape=True)
     html = env.get_template("prehled.html.j2").render(
         stav=stav, duvod=duvod, vysvetleni=vysvetleni, finalni=finalni,
-        fin_skore=format_skore(fin_skore.celkem) if fin_skore else None,
-        soubory=soubory, cisla=cisla, tabulka=_tabulka(beh, konfigurace, hodnoceni, cisla),
-        komentare=[(c, h.celkovy_komentar) for c, h in hodnoceni.items()],
+        fin_skore=format_score(fin_skore.total) if fin_skore else None,
+        soubory=soubory, cisla=cisla, tabulka=_tabulka(beh, konfigurace, evaluations, cisla),
+        komentare=[(c, h.overall_comment) for c, h in evaluations.items()],
         placeholdery=placeholdery, tvrzeni=tvrzeni, podezrele=podezrele,
-        kroky=_kroky(beh), kola=kola, soucet=soucet, cena=_cena(stav.spotreba, konfigurace),
-        doba=_doba(beh), vytvoreno=f"{stav.vytvoreno:%d. %m. %Y %H:%M}",
+        kroky=_kroky(beh), kola=kola, soucet=soucet, cena=_cena(stav.usage, konfigurace),
+        doba=_doba(beh), vytvoreno=f"{stav.created_at:%d. %m. %Y %H:%M}",
         profil=konfigurace.output_profile_name,
     )
-    return beh.zapis_pevny(OVERVIEW_FILE, html)
+    return beh.write_fixed(OVERVIEW_FILE, html)

@@ -9,8 +9,8 @@ class Schema(BaseModel):
 
 
 def test_json_dict_validates_against_schema():
-    m = FakeModel({"krok": [{"a": 1}]})
-    assert m.json("i", "z", Schema, step="krok") == Schema(a=1)
+    m = FakeModel({'step': [{"a": 1}]})
+    assert m.json("i", "z", Schema, step='step') == Schema(a=1)
 
 
 def test_json_basemodel_and_text_str():
@@ -20,9 +20,9 @@ def test_json_basemodel_and_text_str():
 
 
 def test_exact_key_precedes_prefix():
-    m = FakeModel({"hodnoceni_2": [{"a": 1}], "hodnoceni": [{"a": 2}]})
-    assert m.json("i", "z", Schema, step="hodnoceni_2").a == 1
-    assert m.json("i", "z", Schema, step="hodnoceni_3").a == 2
+    m = FakeModel({'evaluation_2': [{"a": 1}], 'evaluation': [{"a": 2}]})
+    assert m.json("i", "z", Schema, step='evaluation_2').a == 1
+    assert m.json("i", "z", Schema, step='evaluation_3').a == 2
 
 
 def test_exception_is_raised():
@@ -58,5 +58,5 @@ def test_usage_is_taken_and_cleared():
     m.text("i", "z", step="k")
     s = m.take_usage()
     assert len(s) == 2
-    assert (s[0].krok, s[0].model, s[0].vstup, s[0].vystup) == ("k", "f", 1000, 500)
+    assert (s[0].step, s[0].model, s[0].input_tokens, s[0].output_tokens) == ("k", "f", 1000, 500)
     assert m.take_usage() == []
