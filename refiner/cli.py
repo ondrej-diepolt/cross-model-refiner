@@ -42,7 +42,7 @@ from refiner.models.codex_cli import CodexModel
 from refiner.models.fakes import demo_models
 from refiner.models.gpt import GptModel
 from refiner.models.interface import Model
-from refiner.porovnani import nacti_referenci, najdi_referenci
+from refiner.comparison import read_reference, find_reference
 from refiner.input import InputError, find_inputs, find_template, resolve_materials_directory
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -196,7 +196,7 @@ def _slozka_behu(koren: Path, hodnota: str, stavy: set[str], nanecisto: bool) ->
 
 def _cesta_reference(koren: Path, hodnota: str | None) -> Path:
     if hodnota is None:
-        return najdi_referenci(koren)
+        return find_reference(koren)
     cesta = Path(hodnota)
     if not cesta.is_absolute() and not cesta.exists() and (koren / cesta).exists():
         cesta = koren / cesta
@@ -298,7 +298,7 @@ def _spust(
             beh, sources = otevri_dokonceny(slozka, koren=koren, nanecisto=False, hlaseni=konzole)
             obnov_prompty_porovnani(beh, koren / 'prompts')
             reference = _cesta_reference(koren, args.reference)
-            reference_md = nacti_referenci(reference)
+            reference_md = read_reference(reference)
             hodnotitel = hodnotitel_fn(sources.configuration)
             konzole(f"Porovnávám běh {beh.directory} s referencí {reference.name}")
         elif args.pokracovat is not None:

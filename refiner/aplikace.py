@@ -26,11 +26,11 @@ from refiner.configuration import (
 from refiner.steps import Sources
 from refiner.models.errors import ModelError
 from refiner.models.interface import Model
-from refiner.porovnani import porovnej
+from refiner.comparison import compare
 from refiner.loop import run_loop
 from refiner.input import InputError, read_as_markdown, read_materials, resolve_materials_directory
-from refiner.vystup.docx import exportuj_docx
-from refiner.vystup.prehled import vytvor_prehled
+from refiner.output.docx import export_docx
+from refiner.output.overview import create_overview
 
 _log = logging.getLogger(__name__)
 
@@ -247,7 +247,7 @@ def _preruseni(
         _log.exception("Spotřebu přerušeného kroku se nepodařilo uložit.")
     beh.finish('interrupted', error=chyba)
     try:
-        vytvor_prehled(beh, sources.configuration)
+        create_overview(beh, sources.configuration)
     except Exception:
         _log.exception("Přehled přerušeného běhu se nepodařilo vytvořit.")
     hlaseni(chyba)
@@ -270,14 +270,14 @@ def _dokonci(
         nazev = sources.configuration.output_profile_name
         beh.write_fixed(f"FINALNI_{nazev}.md", finalni)
         try:
-            exportuj_docx(finalni, beh.directory / f"FINALNI_{nazev}.docx", sablona)
+            export_docx(finalni, beh.directory / f"FINALNI_{nazev}.docx", sablona)
         except Exception as e:
             _log.exception("Export do DOCX selhal.")
             beh.add_warning(
                 f"Export do DOCX se nepodařil ({e}); finální text je v souboru FINALNI_{nazev}.md."
             )
         beh.finish('completed', vysledek.reason, final_version=vysledek.final_version)
-        prehled = vytvor_prehled(beh, sources.configuration)
+        prehled = create_overview(beh, sources.configuration)
         _log.info("Běh dokončen (%s, finální verze %d).", vysledek.reason, vysledek.final_version)
         hlaseni(f"Hotovo. Přehled běhu: {prehled}")
         return 0
@@ -338,14 +338,14 @@ def porovnej_beh(
     reference_md: str,
     hodnotitel: Model,
     hlaseni: Callable[[str], None],
-    nazev_reference: str | None = None,
+    reference_name: str | None = None,
 ) -> int:
     """Porovná dokončený běh s referencí. Vrací 0 = hotovo, 1 = porovnání selhalo (lze zopakovat),
     2 = chyba konfigurace (prompt). Stav běhu zůstává `dokoncen`."""
     with _log_behu(beh):
-        _log.info("Porovnání s referencí %s: start.", nazev_reference or "(bez názvu)")
+        _log.info("Porovnání s referencí %s: start.", reference_name or "(bez názvu)")
         try:
-            html = porovnej(beh, sources, reference_md, hodnotitel, hlaseni, nazev_reference=nazev_reference)
+            html = compare(beh, sources, reference_md, hodnotitel, hlaseni, reference_name=reference_name)
         except ConfigurationError as e:
             hlaseni(str(e))
             return 2

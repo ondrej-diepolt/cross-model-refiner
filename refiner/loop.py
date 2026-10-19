@@ -26,8 +26,8 @@ from refiner.steps import (
 )
 from refiner.models.interface import Model
 from refiner.scoring import format_score, calculate_score, select_final_version
-from refiner.vystup.diff import diff_html
-from refiner.vystup.markdown import hodnoceni_md, nalezitosti_md, posouzeni_md
+from refiner.output.diff import diff_html
+from refiner.output.markdown import evaluation_markdown, requirements_markdown, review_markdown
 
 StopReason = Literal['target_reached', 'revision_limit', 'no_changes']
 
@@ -73,7 +73,7 @@ def run_loop(
     else:
         announce(1, "Náležitosti z poptávky")
         requirements, warnings = extract_requirements(writer, sources)
-        run.write('requirements', "nalezitosti.md", nalezitosti_md(requirements, warnings),
+        run.write('requirements', "nalezitosti.md", requirements_markdown(requirements, warnings),
                   data=RequirementsOutput(requirements=requirements))
         for v in warnings:
             run.add_warning(v)
@@ -113,7 +113,7 @@ def run_loop(
             announce(position, f"Hodnocení {k}" + (" (závěrečné)" if is_final else ""))
             h, warnings = evaluate(evaluator, sources, criteria, document, rejected_suggestions, step)
             result = calculate_score(h, criteria, settings)
-            run.write(step, f"hodnoceni_{k}.md", hodnoceni_md(k, h, result, criteria), data=h)
+            run.write(step, f"hodnoceni_{k}.md", evaluation_markdown(k, h, result, criteria), data=h)
             run.save_score(k, result)
             for v in warnings:
                 run.add_warning(v)
@@ -133,7 +133,7 @@ def run_loop(
         else:
             announce(position + 1, f"Posouzení návrhů z hodnocení {k}")
             p = review_suggestions(writer, sources, requirements, document, h, step)
-            run.write(step, f"posouzeni_{k}.md", posouzeni_md(k, h, p), data=p)
+            run.write(step, f"posouzeni_{k}.md", review_markdown(k, h, p), data=p)
             save_usage()
         rejected_suggestions += _rejected(h, p)
 

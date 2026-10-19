@@ -13,9 +13,9 @@ from refiner.run import Run
 from refiner.data import Evaluation, SuggestionReview, RequirementsOutput
 from refiner.models.errors import ModelError
 from refiner.models.fakes import FakeModel
-from refiner.porovnani import (
+from refiner.comparison import (
     Coverage, ElementCoverage, ReferenceElement, ReferenceElements,
-    PairComparison, CriterionComparison, porovnej,
+    PairComparison, CriterionComparison, compare,
 )
 from tests.helpers import TEST_REQUEST, make_evaluation, make_criteria, scripted_responses
 
@@ -99,7 +99,7 @@ def test_existing_output_paths_and_czech_content(tmp_path, repo_root):
         from refiner.artifacts import PROMPT_SNAPSHOT_NAMES
         assert (snapshot / "prompty" / PROMPT_SNAPSHOT_NAMES[prompt.stem]).read_bytes() == prompt.read_bytes()
 
-    comparison = porovnej(completed, sources, "# Reference\n\nMetodika cvičení.", _comparison_model(),
+    comparison = compare(completed, sources, "# Reference\n\nMetodika cvičení.", _comparison_model(),
                          lambda _: None)
     assert comparison.name == "porovnani.html"
     assert _paths(completed.directory) == _expected(

@@ -13,7 +13,7 @@ from refiner.steps import with_repair as with_repair
 from refiner.models.errors import ModelError
 from refiner.models.codex_cli import CodexModel, codex_error_kind, read_events
 from refiner.models.subprocess import ProcessTimeout, ProcessResult
-from refiner.porovnani import Coverage as Coverage, ReferenceElements as ReferenceElements, PairComparison as PairComparison
+from refiner.comparison import Coverage as Coverage, ReferenceElements as ReferenceElements, PairComparison as PairComparison
 
 ROOT = Path(__file__).parent.parent
 

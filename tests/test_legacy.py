@@ -214,9 +214,9 @@ def test_frozen_model_payloads_dump_and_expose_english_schema(legacy_interrupted
     ("refiner.data", "Requirement", {"id": "N1", "text": "citace", "citace": "hodnoceni_1"}, {"id": "N1", "text": "citace", "citation": "hodnoceni_1"}),
     ("refiner.data", "Criterion", {"id": "N1", "nazev": "název", "popis": "popis", "vaha": 1, "skupina": "A"}, {"id": "N1", "name": "název", "description": "popis", "weight": 1, "group": "A"}),
     ("refiner.data", "TokenUsage", {"krok": "hodnoceni_1", "model": "hodnoceni_1", "vstup": 1, "vystup": 2}, {"step": "evaluation_1", "model": "hodnoceni_1", "input_tokens": 1, "output_tokens": 2, "cache_read_tokens": 0, "cache_write_tokens": 0, "subscription": False}),
-    ("refiner.porovnani", "PairComparison", {"kriteria": [{"id": "B1", "lepsi": "stejne", "zduvodneni": "Stejné."}]}, {"criteria": [{"id": "B1", "better": "tie", "rationale": "Stejné."}]}),
-    ("refiner.porovnani", "ReferenceElements", {"prvky": [{"id": "P1", "popis": "Prvek."}]}, {"elements": [{"id": "P1", "description": "Prvek."}]}),
-    ("refiner.porovnani", "Coverage", {"polozky": [{"id": "P1", "stav": "chybi", "komentar": "Chybí."}]}, {"items": [{"id": "P1", "status": "missing", "comment": "Chybí."}]}),
+    ("refiner.comparison", "PairComparison", {"kriteria": [{"id": "B1", "lepsi": "stejne", "zduvodneni": "Stejné."}]}, {"criteria": [{"id": "B1", "better": "tie", "rationale": "Stejné."}]}),
+    ("refiner.comparison", "ReferenceElements", {"prvky": [{"id": "P1", "popis": "Prvek."}]}, {"elements": [{"id": "P1", "description": "Prvek."}]}),
+    ("refiner.comparison", "Coverage", {"polozky": [{"id": "P1", "stav": "chybi", "komentar": "Chybí."}]}, {"items": [{"id": "P1", "status": "missing", "comment": "Chybí."}]}),
 ])
 def test_legacy_typed_aliases_preserve_text_and_canonical_serialization(module, class_name, payload, expected):
     model = getattr(importlib.import_module(module), class_name)
@@ -226,7 +226,7 @@ def test_legacy_typed_aliases_preserve_text_and_canonical_serialization(module, 
 
 @pytest.mark.parametrize("module,class_name", [
     *(('refiner.data', name) for name in ("Requirement", "RequirementsOutput", "CriterionScore", "FabricatedFact", "ClaimToVerify", "RevisionSuggestion", "Evaluation", "SuggestionDecision", "SuggestionReview")),
-    *(('refiner.porovnani', name) for name in ("CriterionComparison", "PairComparison", "ReferenceElement", "ReferenceElements", "ElementCoverage", "Coverage")),
+    *(('refiner.comparison', name) for name in ("CriterionComparison", "PairComparison", "ReferenceElement", "ReferenceElements", "ElementCoverage", "Coverage")),
 ])
 def test_model_schemas_keep_every_field_required_and_without_defaults_or_ranges(module, class_name):
     model = getattr(importlib.import_module(module), class_name)
@@ -239,7 +239,7 @@ def test_model_schemas_keep_every_field_required_and_without_defaults_or_ranges(
 
 
 def test_legacy_comparison_result_normalizes_verdict_values_without_translating_ids():
-    from refiner.porovnani import ComparisonResult
+    from refiner.comparison import ComparisonResult
 
     score = {"a": 9, "b": 9, "c": 10, "celkem": 9.2, "cil_splnen": False, "duvody_nesplneni": []}
     result = ComparisonResult.model_validate({

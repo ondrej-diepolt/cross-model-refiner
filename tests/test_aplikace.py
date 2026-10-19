@@ -269,7 +269,7 @@ def test_selhani_prehledu_neprebije_puvodni_chybu(koren, monkeypatch):
     def rozbity(*_a, **_k):
         raise RuntimeError("šablona přehledu je rozbitá")
 
-    monkeypatch.setattr(aplikace, "vytvor_prehled", rozbity)
+    monkeypatch.setattr(aplikace, "create_overview", rozbity)
     beh, z = _zahaj(koren)
     pisatel, _ = scripted_models([9.5])
     hodnotitel = FakeModel({'evaluation_1': [ModelError('credit', "OpenAI")]}, name="gpt-falesny")
@@ -285,7 +285,7 @@ def test_selhani_docx_exportu_je_varovani(koren, monkeypatch):
     def rozbity(*_a, **_k):
         raise OSError("pandoc nenalezen")
 
-    monkeypatch.setattr(aplikace, "exportuj_docx", rozbity)
+    monkeypatch.setattr(aplikace, "export_docx", rozbity)
     beh, z = _zahaj(koren)
     assert dokonci(beh, z, *scripted_models([9.5]), hlaseni=lambda _: None, sablona=None) == 0
     st = Run.open(beh.directory).state

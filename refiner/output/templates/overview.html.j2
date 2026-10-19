@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>Přehled běhu – {{ state.input }}</title>
+<style>
+body { font-family: Segoe UI, Arial, sans-serif; margin: 2rem auto; max-width: 70rem; padding: 0 1rem; color: #222; }
+h1 { margin-bottom: 0.2rem; } h2 { margin-top: 2rem; border-bottom: 1px solid #ccc; padding-bottom: 0.2rem; }
+.meta { color: #666; }
+.block { padding: 0.8rem 1rem; border-radius: 6px; margin: 1rem 0; }
+.error { background: #fde8e8; border: 1px solid #c0392b; color: #7b1d12; }
+.ok { background: #e8f6ec; border: 1px solid #2e8b57; }
+.info { background: #fff6e0; border: 1px solid #e0a800; }
+table { border-collapse: collapse; margin: 0.5rem 0; }
+th, td { border: 1px solid #ccc; padding: 0.3rem 0.6rem; text-align: left; }
+td.c { text-align: center; }
+tr.summary td { font-style: italic; background: #f4f4f4; } tr.total td { font-weight: bold; }
+td.score-red { background: #f5b7b1; } td.score-orange { background: #fad7a0; } td.score-green { background: #abebc6; }
+ul { margin: 0.3rem 0; }
+</style>
+</head>
+<body>
+<h1>Přehled běhu</h1>
+<p class="meta">Vstup: {{ state.input }} · profil: {{ profile_name }} · spuštěno {{ created_at }}</p>
+
+<h2>1. Výsledek</h2>
+{% if state.status == "interrupted" %}
+<div class="block error">
+<strong>Běh byl přerušen</strong>
+<p>{{ state.error or "Bez uvedené příčiny." }}</p>
+<p>Pokračovat lze spuštěním pokracovat.bat.</p>
+</div>
+{% elif state.status == "completed" %}
+<div class="block ok">
+<p><strong>{{ reason }}</strong></p>
+{% if final_score %}<p>Finální skóre: <strong>{{ final_score }}</strong> (verze {{ final_version }})</p>{% endif %}
+<p>Finální dokument:
+{% for s in files %}{% if s.exists %}<a href="{{ s.file }}">{{ s.file }}</a>{% else %}{{ s.file }}{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</p>
+{% if explanation %}<p>{{ explanation }}</p>{% endif %}
+</div>
+{% else %}
+<div class="block info">Běh neskončil (nebo byl ukončen bez záznamu). Přehled ukazuje, co je zatím hotové.</div>
+{% endif %}
+{% if state.warnings %}
+<div class="block info"><strong>Varování</strong><ul>{% for v in state.warnings %}<li>{{ v }}</li>{% endfor %}</ul></div>
+{% endif %}
+
+<h2>2. Skóre podle kritérií</h2>
+{% if numbers %}
+<table>
+<tr><th>Kritérium</th>{% for c in numbers %}<th>Hodnocení {{ c }}</th>{% endfor %}</tr>
+{% for r in table %}
+<tr class="{{ r.type }}"><td>{% if r.type == "criterion" %}{{ r.id }} – {% endif %}{{ r.name }}</td>
+{% for b in r.cells %}<td class="c {{ b.css_class }}"{% if b.title %} title="{{ b.title }}"{% endif %}>{{ b.text }}</td>{% endfor %}</tr>
+{% endfor %}
+</table>
+{% for c, k in comments %}{% if k %}<p><strong>Komentář hodnotitele {{ c }}:</strong> {{ k }}</p>{% endif %}{% endfor %}
+{% else %}
+<p>Zatím nebylo žádné hodnocení.</p>
+{% endif %}
+
+<h2>3. Co musíte doplnit</h2>
+{% if placeholders %}
+<ul>{% for p in placeholders %}<li>{{ p or "(bez popisu)" }}</li>{% endfor %}</ul>
+{% else %}<p>Ve finálním dokumentu nic k doplnění není.</p>{% endif %}
+
+<h2>4. K ověření</h2>
+{% if claims %}
+<h3>Tvrzení, která hodnotitel doporučuje ověřit</h3>
+<ul>{% for t in claims %}<li>{{ t.citation }} – {{ t.reason }}</li>{% endfor %}</ul>
+{% endif %}
+{% if suspicious %}
+<h3>Údaje, které nejsou v poptávce ani v podkladech</h3>
+{% for g in suspicious %}<p><strong>{{ g.kind }}:</strong> {{ g.values | join(", ") }}</p>{% endfor %}
+{% endif %}
+{% if not claims and not suspicious %}<p>Nic k ověření nebylo nalezeno.</p>{% endif %}
+
+<h2>5. Průběh a návrhy</h2>
+<ol>
+{% for k in steps %}<li>{{ k.description }}: {% for o in k.links %}<a href="{{ o.file }}">{{ o.description }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</li>
+{% endfor %}</ol>
+{% if rounds %}
+<table>
+<tr><th>Hodnocení</th><th>Návrhů</th><th>Přijato</th><th>Částečně</th><th>Odmítnuto</th></tr>
+{% for r in rounds %}<tr><td>{{ r.round }}</td><td>{{ r.suggestions }}</td>
+{% if r.reviewed %}<td>{{ r.accepted }}</td><td>{{ r.partial }}</td><td>{{ r.rejected }}</td>{% else %}<td colspan="3">neposouzeno</td>{% endif %}</tr>
+{% endfor %}
+<tr class="total"><td>Celkem</td><td>{{ totals.suggestions }}</td><td>{{ totals.accepted }}</td><td>{{ totals.partial }}</td><td>{{ totals.rejected }}</td></tr>
+</table>
+{% endif %}
+
+<h2>6. Modely, spotřeba a cena</h2>
+{% if cost.rows %}
+<table>
+<tr><th>Model</th><th>Vstupní tokeny</th><th>Cache – čtení / zápis</th><th>Výstupní tokeny</th><th>Cena (orientačně, cache odhadem)</th></tr>
+{% for r in cost.rows %}<tr><td>{{ r.model }}</td><td>{{ r.input_tokens }}</td><td>{{ r.cache_read_tokens }} / {{ r.cache_write_tokens }}</td><td>{{ r.output_tokens }}</td><td>{{ r.cost }}</td></tr>
+{% endfor %}
+<tr class="total"><td>Celkem</td><td>{{ cost.input_tokens }}</td><td>{{ cost.cache_read_tokens }} / {{ cost.cache_write_tokens }}</td><td>{{ cost.output_tokens }}</td><td>{% if cost.subscription_only %}v předplatném{% else %}{{ cost.total }} USD{% if cost.unknown %} + cena neznámá u některých modelů{% endif %}{% if cost.subscription %} + část v předplatném{% endif %}{% endif %}</td></tr>
+</table>
+<p class="meta">Cena je pouze orientační: počítá se z tokenů a cen v nastavení. Sleva za čtení z cache
+a příplatek za zápis do cache jsou odhadnuté (Claude: zápis 1,25×, čtení 0,1× ceny vstupu;
+GPT: čtení 0,5× ceny vstupu). Vstupní tokeny jsou bez tokenů z cache.</p>
+{% if cost.subscription %}<p class="meta">Volání v předplatném (Claude Code, Codex) se neúčtují po tokenech, jejich cena se proto neuvádí.</p>
+{% endif %}
+{% else %}<p>Zatím nebyl spotřebován žádný token.</p>{% endif %}
+<p>Doba běhu: {{ duration }}</p>
+</body>
+</html>

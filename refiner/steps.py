@@ -23,7 +23,7 @@ from refiner.models.errors import ModelError, Service
 from refiner.models.interface import Model
 from refiner.artifacts import PROMPT_SNAPSHOT_NAMES
 from refiner.legacy import adapt_legacy_prompt, prompt_variables
-from refiner.vystup.markdown import PRIORITY_LABELS
+from refiner.output.markdown import PRIORITY_LABELS
 
 T = TypeVar("T")
 

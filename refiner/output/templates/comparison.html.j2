@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>Porovnání s referencí – {{ directory }}</title>
+<style>
+body { font-family: Segoe UI, Arial, sans-serif; margin: 2rem auto; max-width: 70rem; padding: 0 1rem; color: #222; }
+h1 { margin-bottom: 0.2rem; } h2 { margin-top: 2rem; border-bottom: 1px solid #ccc; padding-bottom: 0.2rem; }
+.meta { color: #666; }
+.block { padding: 0.8rem 1rem; border-radius: 6px; margin: 1rem 0; }
+.ok { background: #e8f6ec; border: 1px solid #2e8b57; }
+.info { background: #fff6e0; border: 1px solid #e0a800; }
+table { border-collapse: collapse; margin: 0.5rem 0; }
+th, td { border: 1px solid #ccc; padding: 0.3rem 0.6rem; text-align: left; vertical-align: top; }
+td.c { text-align: center; }
+tr.summary td { font-style: italic; background: #f4f4f4; } tr.total td { font-weight: bold; }
+td.v-generated, td.p-present { background: #abebc6; }
+td.v-reference, td.p-missing { background: #f5b7b1; }
+td.v-tie, td.p-partial { background: #fad7a0; }
+ul { margin: 0.3rem 0; }
+</style>
+</head>
+<body>
+<h1>Porovnání s referencí</h1>
+<p class="meta">Běh: {{ directory }}{% if reference %} · reference: {{ reference }}{% endif %} · finální verze {{ final_version }}{% if final_file %} (<a href="{{ final_file }}">{{ final_file }}</a>){% endif %} · <a href="prehled.html">přehled běhu</a></p>
+
+<h2>1. Kalibrace hodnotitele</h2>
+<div class="block {% if target_met %}ok{% else %}info{% endif %}"><strong>{{ sentence }}</strong></div>
+<p>Reference prošla stejným hodnocením jako generovaná nabídka (stejné náležitosti, kritéria, profil firmy a prompt).</p>
+<table>
+<tr><th>Kritérium</th><th>Reference</th><th>Generovaná (finální)</th><th>Zdůvodnění u reference</th></tr>
+{% for r in calibration %}<tr><td>{{ r.id }} – {{ r.name }}</td><td class="c">{{ r.reference }}</td><td class="c">{{ r.generated }}</td><td>{{ r.rationales }}</td></tr>
+{% endfor %}
+{% for r in summary %}<tr class="{% if loop.last %}total{% else %}summary{% endif %}"><td>{{ r.name }}</td><td class="c">{{ r.reference }}</td><td class="c">{{ r.generated }}</td><td></td></tr>
+{% endfor %}
+</table>
+{% if fabricated_facts %}<p class="meta">Hodnotitel našel v referenci {{ fabricated_facts }} údajů, které nejsou v poptávce ani v podkladech. Pro férové srovnání vyplňte materials/company_profile.md stejnými fakty, jaké má reference (sazba, tým, reference).</p>{% endif %}
+
+<h2>2. Párové srovnání po kritériích</h2>
+<p>Hodnotitel porovnal oba dokumenty dvakrát, anonymizované jako A/B a s prohozeným pořadím. Když se obě srovnání neshodnou nebo hodnotitel nevidí podstatný rozdíl, je výsledek „nerozhodně“.
+Generovaná lepší: <strong>{{ counts.generated }}</strong> · reference lepší: <strong>{{ counts.reference }}</strong> · nerozhodně: <strong>{{ counts.tie }}</strong></p>
+<table>
+<tr><th>Kritérium</th><th>Výsledek</th><th>Zdůvodnění</th></tr>
+{% for r in comparisons %}<tr><td>{{ r.id }} – {{ r.name }}</td>
+<td class="c v-{{ r.verdict }}">{{ verdict_labels[r.verdict] }}</td>
+<td><ul>{% for z in r.rationales %}<li>{{ z }}</li>{% endfor %}</ul></td></tr>
+{% endfor %}
+</table>
+
+<h2>3. Pokrytí obsahu reference</h2>
+<p>Konkrétní prvky reference a zda jsou v generované nabídce. Chybějící prvky jsou podnět pro úpravu promptů a profilu.
+Chybí: <strong>{{ coverage_counts.missing }}</strong> · částečně: <strong>{{ coverage_counts.partial }}</strong> · je: <strong>{{ coverage_counts.present }}</strong></p>
+<table>
+<tr><th>Prvek</th><th>V generované nabídce</th><th>Komentář</th></tr>
+{% for r in coverage %}<tr><td>{{ r.id }} – {{ r.description }}</td>
+<td class="c p-{{ r.status }}">{{ coverage_labels[r.status] }}</td>
+<td>{{ r.comment }}</td></tr>
+{% endfor %}
+</table>
+
+<h2>4. Lidské hodnocení</h2>
+<p>Skutečné měřítko úspěchu je úsudek konzultanta; automatické části slouží k ladění.
+Vyplňte formulář <a href="{{ form }}">{{ form }}</a> (otevřete ho v textovém editoru).</p>
+</body>
+</html>
