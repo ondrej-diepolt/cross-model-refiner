@@ -1,0 +1,23 @@
+{
+  "rozhodnuti": [
+    {
+      "id_navrhu": "V1",
+      "opora": "Opora.",
+      "predpoklad": "Předpoklad.",
+      "dusledek": "Důsledek.",
+      "rozhodnuti": "prijato",
+      "zduvodneni": "Zdůvodnění.",
+      "jak_zapracovat": "Takto."
+    },
+    {
+      "id_navrhu": "V2",
+      "opora": "Opora.",
+      "predpoklad": "Předpoklad.",
+      "dusledek": "Důsledek.",
+      "rozhodnuti": "prijato",
+      "zduvodneni": "Zdůvodnění.",
+      "jak_zapracovat": "Takto."
+    }
+  ],
+  "shrnuti": "Shrnutí."
+}

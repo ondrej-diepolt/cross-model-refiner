@@ -1,0 +1,73 @@
+{
+  "vstup": "poptavka.md",
+  "profil": "nabidka",
+  "vytvoreno": "2026-10-17T09:00:00",
+  "nanecisto": false,
+  "ukonceno": "2026-10-17T09:00:00",
+  "stav": "dokoncen",
+  "duvod_ukonceni": "cil_splnen",
+  "chyba": null,
+  "finalni_verze": 1,
+  "kroky": {
+    "poptavka": {
+      "cislo": 1,
+      "soubor": "01_poptavka.md",
+      "data": null
+    },
+    "nalezitosti": {
+      "cislo": 2,
+      "soubor": "02_nalezitosti.md",
+      "data": "data/02_nalezitosti.json"
+    },
+    "navrh_1": {
+      "cislo": 3,
+      "soubor": "03_navrh_v1.md",
+      "data": null
+    },
+    "hodnoceni_1": {
+      "cislo": 4,
+      "soubor": "04_hodnoceni_1.md",
+      "data": "data/04_hodnoceni_1.json"
+    }
+  },
+  "skore": {
+    "1": {
+      "a": 9.5,
+      "b": 9.5,
+      "c": 10.0,
+      "celkem": 9.6,
+      "cil_splnen": true,
+      "duvody_nesplneni": []
+    }
+  },
+  "spotreba": [
+    {
+      "krok": "nalezitosti",
+      "model": "claude-falesny",
+      "vstup": 1000,
+      "vystup": 500,
+      "cache_cteni": 0,
+      "cache_zapis": 0,
+      "predplatne": false
+    },
+    {
+      "krok": "navrh_1",
+      "model": "claude-falesny",
+      "vstup": 1000,
+      "vystup": 500,
+      "cache_cteni": 0,
+      "cache_zapis": 0,
+      "predplatne": false
+    },
+    {
+      "krok": "hodnoceni_1",
+      "model": "gpt-falesny",
+      "vstup": 1000,
+      "vystup": 500,
+      "cache_cteni": 0,
+      "cache_zapis": 0,
+      "predplatne": false
+    }
+  ],
+  "varovani": []
+}

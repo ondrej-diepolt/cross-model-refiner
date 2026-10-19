@@ -1,4 +1,5 @@
 import socket
+import shutil
 from pathlib import Path
 
 import pytest
@@ -31,3 +32,15 @@ def zdroje(koren_repa):
     from tests.pomocne import zdroje_test
 
     return zdroje_test(koren_repa)
+
+
+@pytest.fixture
+def legacy_interrupted(tmp_path: Path) -> Path:
+    source = Path(__file__).parent / "fixtures" / "legacy" / "interrupted"
+    return Path(shutil.copytree(source, tmp_path / "legacy-interrupted"))
+
+
+@pytest.fixture
+def legacy_completed(tmp_path: Path) -> Path:
+    source = Path(__file__).parent / "fixtures" / "legacy" / "completed"
+    return Path(shutil.copytree(source, tmp_path / "legacy-completed"))

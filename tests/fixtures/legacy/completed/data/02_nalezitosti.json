@@ -1,0 +1,19 @@
+{
+  "nalezitosti": [
+    {
+      "id": "N1",
+      "text": "Metodika",
+      "citace": "popis metodiky cvičení"
+    },
+    {
+      "id": "N2",
+      "text": "Harmonogram",
+      "citace": "harmonogram a hlavní milníky realizace"
+    },
+    {
+      "id": "N3",
+      "text": "Cena",
+      "citace": "cenu za celé plnění"
+    }
+  ]
+}

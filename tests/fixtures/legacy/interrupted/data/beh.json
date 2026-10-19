@@ -1,0 +1,103 @@
+{
+  "vstup": "poptavka.md",
+  "profil": "nabidka",
+  "vytvoreno": "2026-10-17T09:00:00",
+  "nanecisto": false,
+  "ukonceno": "2026-10-17T09:00:00",
+  "stav": "prerusen",
+  "duvod_ukonceni": null,
+  "chyba": "Nepodařilo se spojit se službou OpenAI. Zkontrolujte připojení a spusťte pokracovat.bat.",
+  "finalni_verze": null,
+  "kroky": {
+    "poptavka": {
+      "cislo": 1,
+      "soubor": "01_poptavka.md",
+      "data": null
+    },
+    "nalezitosti": {
+      "cislo": 2,
+      "soubor": "02_nalezitosti.md",
+      "data": "data/02_nalezitosti.json"
+    },
+    "navrh_1": {
+      "cislo": 3,
+      "soubor": "03_navrh_v1.md",
+      "data": null
+    },
+    "hodnoceni_1": {
+      "cislo": 4,
+      "soubor": "04_hodnoceni_1.md",
+      "data": "data/04_hodnoceni_1.json"
+    },
+    "posouzeni_1": {
+      "cislo": 5,
+      "soubor": "05_posouzeni_1.md",
+      "data": "data/05_posouzeni_1.json"
+    },
+    "navrh_2": {
+      "cislo": 6,
+      "soubor": "06_navrh_v2.md",
+      "data": null
+    }
+  },
+  "skore": {
+    "1": {
+      "a": 8.0,
+      "b": 8.0,
+      "c": 10.0,
+      "celkem": 8.3,
+      "cil_splnen": false,
+      "duvody_nesplneni": [
+        "celkové skóre 8,3 < 9,5"
+      ]
+    }
+  },
+  "spotreba": [
+    {
+      "krok": "nalezitosti",
+      "model": "claude-falesny",
+      "vstup": 1000,
+      "vystup": 500,
+      "cache_cteni": 0,
+      "cache_zapis": 0,
+      "predplatne": false
+    },
+    {
+      "krok": "navrh_1",
+      "model": "claude-falesny",
+      "vstup": 1000,
+      "vystup": 500,
+      "cache_cteni": 0,
+      "cache_zapis": 0,
+      "predplatne": false
+    },
+    {
+      "krok": "hodnoceni_1",
+      "model": "gpt-falesny",
+      "vstup": 1000,
+      "vystup": 500,
+      "cache_cteni": 0,
+      "cache_zapis": 0,
+      "predplatne": false
+    },
+    {
+      "krok": "posouzeni_1",
+      "model": "claude-falesny",
+      "vstup": 1000,
+      "vystup": 500,
+      "cache_cteni": 0,
+      "cache_zapis": 0,
+      "predplatne": false
+    },
+    {
+      "krok": "navrh_2",
+      "model": "claude-falesny",
+      "vstup": 1000,
+      "vystup": 500,
+      "cache_cteni": 0,
+      "cache_zapis": 0,
+      "predplatne": false
+    }
+  ],
+  "varovani": []
+}

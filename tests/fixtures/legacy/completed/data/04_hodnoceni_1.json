@@ -1,0 +1,79 @@
+{
+  "kriteria": [
+    {
+      "id": "N1",
+      "skore": 9.5,
+      "zduvodneni": "Zdůvodnění.",
+      "dukaz": "Důkaz."
+    },
+    {
+      "id": "N2",
+      "skore": 9.5,
+      "zduvodneni": "Zdůvodnění.",
+      "dukaz": "Důkaz."
+    },
+    {
+      "id": "N3",
+      "skore": 9.5,
+      "zduvodneni": "Zdůvodnění.",
+      "dukaz": "Důkaz."
+    },
+    {
+      "id": "B1",
+      "skore": 9.5,
+      "zduvodneni": "Zdůvodnění.",
+      "dukaz": "Důkaz."
+    },
+    {
+      "id": "B2",
+      "skore": 9.5,
+      "zduvodneni": "Zdůvodnění.",
+      "dukaz": "Důkaz."
+    },
+    {
+      "id": "B3",
+      "skore": 9.5,
+      "zduvodneni": "Zdůvodnění.",
+      "dukaz": "Důkaz."
+    },
+    {
+      "id": "B4",
+      "skore": 9.5,
+      "zduvodneni": "Zdůvodnění.",
+      "dukaz": "Důkaz."
+    },
+    {
+      "id": "B5",
+      "skore": 9.5,
+      "zduvodneni": "Zdůvodnění.",
+      "dukaz": "Důkaz."
+    },
+    {
+      "id": "B6",
+      "skore": 9.5,
+      "zduvodneni": "Zdůvodnění.",
+      "dukaz": "Důkaz."
+    }
+  ],
+  "vymyslena_fakta": [],
+  "tvrzeni_k_overeni": [],
+  "navrhy": [
+    {
+      "id": "V1",
+      "kriterium": "B1",
+      "misto": "Místo 1",
+      "problem": "Problém.",
+      "navrh": "Návrh.",
+      "priorita": "stredni"
+    },
+    {
+      "id": "V2",
+      "kriterium": "B1",
+      "misto": "Místo 2",
+      "problem": "Problém.",
+      "navrh": "Návrh.",
+      "priorita": "stredni"
+    }
+  ],
+  "celkovy_komentar": "Komentář."
+}

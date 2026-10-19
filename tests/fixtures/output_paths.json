@@ -1,0 +1,53 @@
+{
+  "snapshots": [
+    "data/konfigurace/nastaveni.yaml",
+    "data/konfigurace/profil.yaml",
+    "data/konfigurace/kriteria.yaml",
+    "data/konfigurace/prompty/nalezitosti.md",
+    "data/konfigurace/prompty/navrh.md",
+    "data/konfigurace/prompty/hodnoceni.md",
+    "data/konfigurace/prompty/posouzeni.md",
+    "data/konfigurace/prompty/zapracovani.md",
+    "data/konfigurace/prompty/porovnani_kriteria.md",
+    "data/konfigurace/prompty/porovnani_prvky.md",
+    "data/konfigurace/prompty/porovnani_pokryti.md"
+  ],
+  "static": [
+    "data/beh.json",
+    "data/podklady.md",
+    "prehled.html"
+  ],
+  "interrupted_steps": [
+    "01_poptavka.md",
+    "02_nalezitosti.md",
+    "03_navrh_v1.md",
+    "04_hodnoceni_1.md",
+    "05_posouzeni_1.md",
+    "06_navrh_v2.md",
+    "06_navrh_v2_zmeny.html",
+    "data/02_nalezitosti.json",
+    "data/04_hodnoceni_1.json",
+    "data/05_posouzeni_1.json"
+  ],
+  "completed_steps": [
+    "01_poptavka.md",
+    "02_nalezitosti.md",
+    "03_navrh_v1.md",
+    "04_hodnoceni_1.md",
+    "data/02_nalezitosti.json",
+    "data/04_hodnoceni_1.json"
+  ],
+  "final_exports": [
+    "FINALNI_nabidka.md",
+    "FINALNI_nabidka.docx"
+  ],
+  "log": [
+    "data/beh.log"
+  ],
+  "comparison": [
+    "porovnani.html",
+    "porovnani_formular.md",
+    "data/porovnani.json",
+    "data/porovnani_kalibrace.json"
+  ]
+}

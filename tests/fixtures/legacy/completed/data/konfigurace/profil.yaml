@@ -1,0 +1,50 @@
+# Profil dokumentu: nabídka na základě poptávky.
+# Váhy kritérií uvnitř skupiny B (obecná kvalita) dávají součet 1, lze je upravit.
+nazev: Nabídka
+typ_dokumentu: nabídka
+pokyny_struktura: |
+  Doporučená osnova nabídky (přizpůsobte konkrétní poptávce):
+  1. Manažerské shrnutí.
+  2. Tabulka „požadavek poptávky -> kde v nabídce“.
+  3. Cíle plnění.
+  4. Metodika a etapy; ke každé etapě výstupy a kritéria převzetí.
+  5. Harmonogram s milníky.
+  6. Cena a pracnost po etapách.
+  7. Součinnost zadavatele.
+  8. Předpoklady a omezení.
+  9. Tým a reference.
+kriteria:
+  - id: B1
+    nazev: Konkrétnost
+    popis: >-
+      Nabídka obsahuje konkrétní návrh realizace, ne obecná ujištění o schopnostech
+      dodavatele (výslovný požadavek poptávky).
+    vaha: 0.25
+  - id: B2
+    nazev: Ověřitelnost výstupů
+    popis: >-
+      Každá etapa má jasně popsaný výstup a kritérium převzetí, podle kterého lze
+      splnění ověřit.
+    vaha: 0.20
+  - id: B3
+    nazev: Vnitřní konzistence
+    popis: >-
+      Cena odpovídá pracnosti krát sazba, harmonogram odpovídá etapám a odkazy
+      na kapitoly sedí.
+    vaha: 0.20
+  - id: B4
+    nazev: Srozumitelnost pro zadavatele
+    popis: >-
+      Přehledná struktura, manažerské shrnutí a snadná dohledatelnost požadavků
+      (např. tabulka „požadavek -> kde v nabídce“).
+    vaha: 0.15
+  - id: B5
+    nazev: Hranice a rizika
+    popis: >-
+      Nabídka uvádí předpoklady, omezení a to, co plnění není.
+    vaha: 0.10
+  - id: B6
+    nazev: Jazyk a forma
+    popis: >-
+      Spisovná čeština, profesní tón a přiměřený rozsah.
+    vaha: 0.10
