@@ -9,8 +9,8 @@ import pytest
 from refiner.beh import Beh
 from refiner.cli import main
 from refiner.data import Hodnoceni
-from refiner.modely.chyby import ChybaModelu
-from refiner.modely.falesne import FalesnyModel, demo_modely
+from refiner.models.errors import ModelError
+from refiner.models.fakes import FakeModel, demo_models
 from refiner.porovnani import (
     OTAZKY_FORMULARE,
     Pokryti,
@@ -25,7 +25,7 @@ from refiner.porovnani import (
     zkombinuj_srovnani,
 )
 from refiner.smycka import spust_smycku
-from refiner.vstup import ChybaVstupu
+from refiner.input import InputError
 from tests.pomocne import POPTAVKA_TEST, beh_test, hodnoceni, kriteria_test, skript
 
 ZNACKA = "REFERENCNI-ZNACKA"
@@ -47,7 +47,7 @@ def _pokryti(*stavy: tuple[str, str]) -> Pokryti:
                             for i, (s, c) in enumerate(stavy, start=1)])
 
 
-def _hodnotitel(**prepsat) -> FalesnyModel:
+def _hodnotitel(**prepsat) -> FakeModel:
     """Falešný hodnotitel pro 5 kroků porovnání; kritéria = N1–N3 + kritéria profilu."""
     ids = [x.id for x in kriteria_test(3)]
     odpovedi = {
@@ -58,10 +58,10 @@ def _hodnotitel(**prepsat) -> FalesnyModel:
         "porovnani_pokryti": [_pokryti(("je", "Kap. 2."), ("chybi", "Nikde."), ("castecne", "Jen obecně."))],
     }
     odpovedi.update(prepsat)
-    return FalesnyModel(odpovedi, nazev="gpt-falesny")
+    return FakeModel(odpovedi, name="gpt-falesny")
 
 
-def _dokonceny_beh(tmp_path: Path, zdroje) -> tuple[Beh, FalesnyModel]:
+def _dokonceny_beh(tmp_path: Path, zdroje) -> tuple[Beh, FakeModel]:
     beh = beh_test(tmp_path, zdroje)
     pisatel, hod = skript([9.5])
     vysledek = spust_smycku(beh, zdroje, pisatel, hod, lambda _: None)
@@ -103,7 +103,7 @@ def test_najdi_referenci_jinak_chyba(tmp_path, soubory):
         (tmp_path / "examples").mkdir()
         for n in soubory:
             (tmp_path / "examples" / n).write_text("x", encoding="utf-8")
-    with pytest.raises(ChybaVstupu) as e:
+    with pytest.raises(InputError) as e:
         najdi_referenci(tmp_path)
     assert "--reference" in str(e.value)
 
@@ -115,7 +115,7 @@ def test_porovnej_zapise_vystupy(tmp_path, zdroje):
     hod = _hodnotitel()
     html = porovnej(beh, zdroje, REFERENCE, hod, print).read_text(encoding="utf-8")
     assert "Kalibrace" in html and (beh.slozka / "porovnani_formular.md").exists()
-    assert [krok for krok, *_ in hod.volani] == KROKY
+    assert [krok for krok, *_ in hod.calls] == KROKY
     assert 'href="porovnani_formular.md"' in html
 
     v = VysledekPorovnani.model_validate_json(
@@ -150,11 +150,11 @@ def test_poradi_dokumentu_se_prohodi(tmp_path, zdroje):
     generovana = beh.text("navrh_1")
     hod = _hodnotitel()
     porovnej(beh, zdroje, REFERENCE, hod, _ticho)
-    zadani = {krok: z for krok, _, z in hod.volani}
+    zadani = {krok: z for krok, _, z in hod.calls}
     z1, z2 = zadani["porovnani_srovnani_1"], zadani["porovnani_srovnani_2"]
     assert z1.index(generovana) < z1.index(ZNACKA)
     assert z2.index(ZNACKA) < z2.index(generovana)
-    instrukce = {krok: i for krok, i, _ in hod.volani}
+    instrukce = {krok: i for krok, i, _ in hod.calls}
     # Dokumenty jsou jen A/B: nic v promptu neprozrazuje, který je generovaný a který referenční.
     for text in (z1.replace(ZNACKA, ""), z2.replace(ZNACKA, "")):
         assert "referen" not in text.lower() and "generovan" not in text.lower()
@@ -167,11 +167,11 @@ def test_kalibrace_hodnoti_referenci_stejnymi_kriterii(tmp_path, zdroje):
     beh, _ = _dokonceny_beh(tmp_path, zdroje)
     hod = _hodnotitel()
     porovnej(beh, zdroje, REFERENCE, hod, _ticho)
-    krok, instrukce, zadani = hod.volani[0]
+    krok, instrukce, zadani = hod.calls[0]
     assert ZNACKA in zadani and "**N1**" in instrukce and "**B1**" in instrukce
     assert POPTAVKA_TEST.strip() in instrukce
     # Prvky se vytahují z reference, pokrytí se ověřuje v generované nabídce.
-    zadani_kroku = {krok: z for krok, _, z in hod.volani}
+    zadani_kroku = {krok: z for krok, _, z in hod.calls}
     assert ZNACKA in zadani_kroku["porovnani_prvky"]
     assert ZNACKA not in zadani_kroku["porovnani_pokryti"]
     assert beh.text("navrh_1") in zadani_kroku["porovnani_pokryti"]
@@ -182,18 +182,18 @@ def test_pisatel_nikdy_nevidi_referenci(tmp_path, zdroje):
     beh, pisatel = _dokonceny_beh(tmp_path, zdroje)
     hod = _hodnotitel()
     porovnej(beh, zdroje, REFERENCE, hod, _ticho)
-    assert pisatel.volani, "pisatel měl během běhu pracovat"
-    for _, instrukce, zadani in pisatel.volani:
+    assert pisatel.calls, "pisatel měl během běhu pracovat"
+    for _, instrukce, zadani in pisatel.calls:
         assert ZNACKA not in instrukce and ZNACKA not in zadani
-    assert any(ZNACKA in z for _, _, z in hod.volani)
+    assert any(ZNACKA in z for _, _, z in hod.calls)
 
 
 def test_porovnani_nedokonceneho_behu(tmp_path, zdroje):
     beh = beh_test(tmp_path, zdroje)
     hod = _hodnotitel()
-    with pytest.raises(ChybaVstupu):
+    with pytest.raises(InputError):
         porovnej(beh, zdroje, REFERENCE, hod, _ticho)
-    assert hod.volani == []
+    assert hod.calls == []
 
 
 def test_porovnani_neprepise_stav_behu_a_ulozi_spotrebu(tmp_path, zdroje):
@@ -271,7 +271,7 @@ def test_srovnani_s_chybejicim_kriteriem_se_opravi(tmp_path, zdroje):
     uplne = Srovnani(kriteria=[k(i, "A") for i in ids])
     hod = _hodnotitel(porovnani_srovnani_1=[neuplne, uplne])
     porovnej(beh, zdroje, REFERENCE, hod, _ticho)
-    volani = [(krok, z) for krok, _, z in hod.volani if krok == "porovnani_srovnani_1"]
+    volani = [(krok, z) for krok, _, z in hod.calls if krok == "porovnani_srovnani_1"]
     assert len(volani) == 2
     assert "## Oprava" in volani[1][1] and "N1" in volani[1][1] and "X9" in volani[1][1]
 
@@ -281,9 +281,9 @@ def test_srovnani_s_duplicitou_po_oprave_je_chyba_a_spotreba_zustane(tmp_path, z
     ids = [x.id for x in kriteria_test(3)]
     duplicitni = Srovnani(kriteria=[k(i, "A") for i in ids] + [k("N1", "B")])
     hod = _hodnotitel(porovnani_srovnani_2=[duplicitni, duplicitni])
-    with pytest.raises(ChybaModelu) as e:
+    with pytest.raises(ModelError) as e:
         porovnej(beh, zdroje, REFERENCE, hod, _ticho)
-    assert e.value.druh == "nevalidni_vystup" and "N1" in e.value.detail
+    assert e.value.kind == 'invalid_output' and "N1" in e.value.detail
     spotreba = [s.krok for s in Beh.otevri(beh.slozka).stav.spotreba if s.krok.startswith("porovnani")]
     assert spotreba == KROKY[:2] + ["porovnani_srovnani_2"] * 2
     assert not (beh.slozka / "porovnani.html").exists()
@@ -294,7 +294,7 @@ def test_pokryti_musi_pokryt_kazdy_prvek(tmp_path, zdroje):
     neuplne = Pokryti(polozky=[PokrytiPrvku(id="P1", stav="je", komentar="x")])
     hod = _hodnotitel(porovnani_pokryti=[neuplne, _pokryti(("je", "a"), ("je", "b"), ("je", "c"))])
     porovnej(beh, zdroje, REFERENCE, hod, _ticho)
-    oprava = [z for krok, _, z in hod.volani if krok == "porovnani_pokryti"][1]
+    oprava = [z for krok, _, z in hod.calls if krok == "porovnani_pokryti"][1]
     assert "## Oprava" in oprava and "P2" in oprava and "P3" in oprava
 
 
@@ -305,7 +305,7 @@ def test_prvky_prazdne_nebo_duplicitni_se_opravi(tmp_path, zdroje, prvky):
     beh, _ = _dokonceny_beh(tmp_path, zdroje)
     hod = _hodnotitel(porovnani_prvky=[prvky, _prvky("a", "b", "c")])
     porovnej(beh, zdroje, REFERENCE, hod, _ticho)
-    assert [krok for krok, *_ in hod.volani].count("porovnani_prvky") == 2
+    assert [krok for krok, *_ in hod.calls].count("porovnani_prvky") == 2
 
 
 # ---------------------------------------------------------------- příkazová řádka
@@ -325,13 +325,13 @@ def koren(tmp_path, koren_repa) -> Path:
     return kor
 
 
-def _dokonceny_beh_cli(koren: Path, nanecisto: bool = False) -> tuple[Path, FalesnyModel]:
+def _dokonceny_beh_cli(koren: Path, nanecisto: bool = False) -> tuple[Path, FakeModel]:
     """Dokončený běh s falešnými modely; examples/ s referencí už existuje.
 
     Výchozí je ostrý běh (porovnat ukázkový běh odmítá): klíče se nastaví jen na dobu běhu,
     aby testy porovnání mohly ověřit, které klíče porovnání vyžaduje.
     """
-    modely = demo_modely()
+    modely = demo_models()
     argv = ["--nanecisto"] if nanecisto else []
     pred = set((koren / "output").iterdir()) if (koren / "output").exists() else set()
     if not nanecisto:
@@ -354,8 +354,8 @@ def test_cli_porovnat_ukazkovy_beh_odmitne(koren, monkeypatch):
     hod = _hodnotitel()
     out = io.StringIO()
     assert main(["porovnat", slozka.name], koren=koren, vystup=out,
-                tovarna_modelu=lambda konf, n: (FalesnyModel({}), hod)) == 2
-    assert "ukázkový" in out.getvalue() and hod.volani == []
+                tovarna_modelu=lambda konf, n: (FakeModel({}), hod)) == 2
+    assert "ukázkový" in out.getvalue() and hod.calls == []
     assert not (slozka / "porovnani.html").exists()
 
 
@@ -364,7 +364,7 @@ def test_cli_porovnat_bez_slozky_preskoci_ukazkove_behy(koren, monkeypatch):
     ukazkovy, _ = _dokonceny_beh_cli(koren, nanecisto=True)   # novější
     monkeypatch.setenv("OPENAI_API_KEY", "test-klic")
     assert main(["porovnat"], koren=koren, vystup=io.StringIO(),
-                tovarna_modelu=lambda konf, n: (FalesnyModel({}), _hodnotitel())) == 0
+                tovarna_modelu=lambda konf, n: (FakeModel({}), _hodnotitel())) == 0
     assert (ostry / "porovnani.html").exists() and not (ukazkovy / "porovnani.html").exists()
 
 
@@ -373,23 +373,23 @@ def test_cli_porovnat_jen_ukazkove_behy_je_kod_2(koren, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-klic")
     out = io.StringIO()
     assert main(["porovnat"], koren=koren, vystup=out,
-                tovarna_modelu=lambda konf, n: (FalesnyModel({}), _hodnotitel())) == 2
+                tovarna_modelu=lambda konf, n: (FakeModel({}), _hodnotitel())) == 2
     assert "ukázkové" in out.getvalue()
 
 
 def test_cli_porovnat_bez_slozky(koren, monkeypatch):
     slozka, pisatel_behu = _dokonceny_beh_cli(koren)
     monkeypatch.setenv("OPENAI_API_KEY", "test-klic")
-    pisatel, hod = FalesnyModel({}, nazev="claude-falesny"), _hodnotitel()
+    pisatel, hod = FakeModel({}, name="claude-falesny"), _hodnotitel()
     out = io.StringIO()
     assert main(["porovnat"], koren=koren, vystup=out,
                 tovarna_modelu=lambda konf, nanecisto: (pisatel, hod)) == 0
     assert (slozka / "porovnani.html").exists()
-    assert [krok for krok, *_ in hod.volani] == KROKY
-    assert any(ZNACKA in z for _, _, z in hod.volani)
+    assert [krok for krok, *_ in hod.calls] == KROKY
+    assert any(ZNACKA in z for _, _, z in hod.calls)
     # Generování nikdy nečte examples/ – pisatel referenci neviděl ani během běhu.
-    assert pisatel.volani == []
-    for _, instrukce, zadani in pisatel_behu.volani:
+    assert pisatel.calls == []
+    for _, instrukce, zadani in pisatel_behu.calls:
         assert ZNACKA not in instrukce and ZNACKA not in zadani
     assert "porovnani.html" in out.getvalue()
 
@@ -412,8 +412,8 @@ def test_cli_porovnat_se_slozkou_a_referenci(koren, monkeypatch, tmp_path):
     monkeypatch.setenv("OPENAI_API_KEY", "test-klic")
     hod = _hodnotitel()
     assert main(["porovnat", slozka.name, "--reference", str(jina)], koren=koren, vystup=io.StringIO(),
-                tovarna_modelu=lambda konf, nanecisto: (FalesnyModel({}), hod)) == 0
-    assert "JINA-ZNACKA" in hod.volani[0][2]
+                tovarna_modelu=lambda konf, nanecisto: (FakeModel({}), hod)) == 0
+    assert "JINA-ZNACKA" in hod.calls[0][2]
 
 
 def test_cli_porovnat_nejednoznacna_reference(koren, monkeypatch):
@@ -422,7 +422,7 @@ def test_cli_porovnat_nejednoznacna_reference(koren, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-klic")
     out = io.StringIO()
     assert main(["porovnat"], koren=koren, vystup=out,
-                tovarna_modelu=lambda konf, nanecisto: (FalesnyModel({}), _hodnotitel())) == 2
+                tovarna_modelu=lambda konf, nanecisto: (FakeModel({}), _hodnotitel())) == 2
     assert "--reference" in out.getvalue()
 
 
@@ -431,7 +431,7 @@ def test_cli_porovnat_neexistujici_reference(koren, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-klic")
     out = io.StringIO()
     assert main(["porovnat", "--reference", "neni.docx"], koren=koren, vystup=out,
-                tovarna_modelu=lambda konf, nanecisto: (FalesnyModel({}), _hodnotitel())) == 2
+                tovarna_modelu=lambda konf, nanecisto: (FakeModel({}), _hodnotitel())) == 2
     assert "neni.docx" in out.getvalue()
 
 
@@ -439,29 +439,29 @@ def test_cli_porovnat_bez_dokonceneho_behu(koren, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-klic")
     out = io.StringIO()
     assert main(["porovnat"], koren=koren, vystup=out,
-                tovarna_modelu=lambda konf, nanecisto: (FalesnyModel({}), _hodnotitel())) == 2
+                tovarna_modelu=lambda konf, nanecisto: (FakeModel({}), _hodnotitel())) == 2
     assert "dokončený" in out.getvalue()
 
 
 def test_cli_porovnat_nedokonceny_beh_se_slozkou(koren, monkeypatch):
     assert main(["--nanecisto"], koren=koren, vstup_fn=lambda _: "1", vystup=io.StringIO(),
                 tovarna_modelu=lambda konf, nanecisto: (
-                    demo_modely()[0], FalesnyModel({"hodnoceni_1": [ChybaModelu("sit", "OpenAI")]}))) == 1
+                    demo_models()[0], FakeModel({"hodnoceni_1": [ModelError('network', "OpenAI")]}))) == 1
     slozka = next((koren / "output").iterdir())
     monkeypatch.setenv("OPENAI_API_KEY", "test-klic")
     out = io.StringIO()
     assert main(["porovnat", str(slozka)], koren=koren, vystup=out,
-                tovarna_modelu=lambda konf, nanecisto: (FalesnyModel({}), _hodnotitel())) == 2
+                tovarna_modelu=lambda konf, nanecisto: (FakeModel({}), _hodnotitel())) == 2
     assert "dokončen" in out.getvalue()
 
 
 def test_cli_porovnat_chyba_modelu_je_kod_1(koren, monkeypatch):
     slozka, _ = _dokonceny_beh_cli(koren)
     monkeypatch.setenv("OPENAI_API_KEY", "test-klic")
-    hod = _hodnotitel(porovnani_prvky=[ChybaModelu("pretizeni", "OpenAI")])
+    hod = _hodnotitel(porovnani_prvky=[ModelError('overloaded', "OpenAI")])
     out = io.StringIO()
     assert main(["porovnat"], koren=koren, vystup=out,
-                tovarna_modelu=lambda konf, nanecisto: (FalesnyModel({}), hod)) == 1
+                tovarna_modelu=lambda konf, nanecisto: (FakeModel({}), hod)) == 1
     assert "porovnat.bat" in out.getvalue() and "pokracovat.bat" not in out.getvalue()
     stav = Beh.otevri(slozka).stav
     assert stav.stav == "dokoncen"
@@ -472,10 +472,10 @@ def test_cli_porovnat_chyba_modelu_je_kod_1(koren, monkeypatch):
 def test_cli_porovnat_ulozi_surovou_odpoved(koren, monkeypatch):
     slozka, _ = _dokonceny_beh_cli(koren)
     monkeypatch.setenv("OPENAI_API_KEY", "test-klic")
-    chyba = ChybaModelu("nevalidni_vystup", "OpenAI", detail="x", surova_odpoved="SUROVA-ODPOVED")
+    chyba = ModelError('invalid_output', "OpenAI", detail="x", raw_response="SUROVA-ODPOVED")
     hod = _hodnotitel(porovnani_kalibrace=[chyba, chyba])   # neplatná i po opravě
     assert main(["porovnat"], koren=koren, vystup=io.StringIO(),
-                tovarna_modelu=lambda konf, nanecisto: (FalesnyModel({}), hod)) == 1
+                tovarna_modelu=lambda konf, nanecisto: (FakeModel({}), hod)) == 1
     surove = list((slozka / "data").glob("surova_odpoved_porovnani_*.txt"))
     assert len(surove) == 1 and surove[0].read_text(encoding="utf-8") == "SUROVA-ODPOVED"
 
@@ -492,15 +492,15 @@ def test_cli_porovnat_doplni_prompty_porovnani_do_kopie_behu(koren, monkeypatch)
     monkeypatch.setenv("OPENAI_API_KEY", "test-klic")
     hod = _hodnotitel()
     assert main(["porovnat"], koren=koren, vystup=io.StringIO(),
-                tovarna_modelu=lambda konf, nanecisto: (FalesnyModel({}), hod)) == 0
-    assert "UPRAVENY-PROMPT" in dict((krok, i) for krok, i, _ in hod.volani)["porovnani_prvky"]
+                tovarna_modelu=lambda konf, nanecisto: (FakeModel({}), hod)) == 0
+    assert "UPRAVENY-PROMPT" in dict((krok, i) for krok, i, _ in hod.calls)["porovnani_prvky"]
     assert "UPRAVENY-PROMPT" in (kopie / "porovnani_prvky.md").read_text(encoding="utf-8")
     # Kalibrace hodnotí stejným promptem jako běh (kopie hodnoceni.md se nepřepisuje).
     (koren / "prompty" / "hodnoceni.md").write_text("ZMENENY", encoding="utf-8")
     hod = _hodnotitel()
     assert main(["porovnat"], koren=koren, vystup=io.StringIO(),
-                tovarna_modelu=lambda konf, nanecisto: (FalesnyModel({}), hod)) == 0
-    assert "ZMENENY" not in hod.volani[0][1]
+                tovarna_modelu=lambda konf, nanecisto: (FakeModel({}), hod)) == 0
+    assert "ZMENENY" not in hod.calls[0][1]
 
 
 def test_cli_porovnat_nanecisto_neni_podporovano(koren):

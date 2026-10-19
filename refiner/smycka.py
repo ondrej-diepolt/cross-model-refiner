@@ -24,7 +24,7 @@ from refiner.kroky import (
     prijate,
     zapracuj,
 )
-from refiner.modely.rozhrani import Model
+from refiner.models.interface import Model
 from refiner.skore import format_skore, spocitej, vyber_finalni
 from refiner.vystup.diff import diff_html
 from refiner.vystup.markdown import hodnoceni_md, nalezitosti_md, posouzeni_md
@@ -65,7 +65,7 @@ def spust_smycku(
         hlaseni(f"[{poradi}/{celkem_kroku}] {popis}…")
 
     def uloz_spotrebu() -> None:
-        beh.pridej_spotrebu(pisatel.vyzvedni_spotrebu() + hodnotitel.vyzvedni_spotrebu())
+        beh.pridej_spotrebu(pisatel.take_usage() + hodnotitel.take_usage())
 
     # Krok 0 – náležitosti
     if beh.hotovo("nalezitosti"):

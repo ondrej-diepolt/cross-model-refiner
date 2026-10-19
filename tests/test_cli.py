@@ -8,8 +8,8 @@ import pytest
 from refiner.beh import Beh
 from refiner.cli import main
 from refiner.kroky import extrahuj_nalezitosti
-from refiner.modely.chyby import ChybaModelu
-from refiner.modely.falesne import FalesnyModel, demo_modely
+from refiner.models.errors import ModelError
+from refiner.models.fakes import FakeModel, demo_models
 from tests.pomocne import POPTAVKA_TEST
 
 
@@ -75,8 +75,8 @@ def test_nanecisto_poptavka_bez_odrazek(koren):
 
 
 def test_demo_modely_nalezitosti_cituji_odrazky_poptavky(zdroje):
-    pisatel, hodnotitel = demo_modely()
-    assert hodnotitel.nazev.startswith("gpt") and not pisatel.nazev.startswith("gpt")
+    pisatel, hodnotitel = demo_models()
+    assert hodnotitel.name.startswith("gpt") and not pisatel.name.startswith("gpt")
     nalezitosti, varovani = extrahuj_nalezitosti(pisatel, zdroje)
     assert varovani == []
     assert [n.citace for n in nalezitosti] == [
@@ -139,7 +139,7 @@ def test_klic_z_env_souboru(koren):
 
     def tovarna(konf, nanecisto):
         pouzite.append(nanecisto)
-        return demo_modely()
+        return demo_models()
 
     out = io.StringIO()
     try:
@@ -153,7 +153,7 @@ def test_klic_z_env_souboru(koren):
 def test_predplatne_nekontroluje_klice(koren):
     out = io.StringIO()
     assert main([], koren=koren, vstup_fn=lambda _: "1", vystup=out,
-                tovarna_modelu=lambda konf, nanecisto: demo_modely()) == 0
+                tovarna_modelu=lambda konf, nanecisto: demo_models()) == 0
     assert "ANTHROPIC_API_KEY" not in out.getvalue() and "OPENAI_API_KEY" not in out.getvalue()
 
 
@@ -187,7 +187,7 @@ def test_vychozi_tovarna_podle_rezimu(zdroje, monkeypatch):
     assert typy(cli._vychozi_tovarna(api, False)) == ("ClaudeModel", "GptModel")
     assert type(cli._vychozi_hodnotitel(predplatne)).__name__ == "CodexModel"
     assert type(cli._vychozi_hodnotitel(api)).__name__ == "GptModel"
-    assert cli._vychozi_tovarna(predplatne, True)[1].nazev.startswith("gpt")   # demo modely
+    assert cli._vychozi_tovarna(predplatne, True)[1].name.startswith("gpt")   # demo modely
 
 
 def test_predplatne_nepripraveny_nastroj_je_kod_2(koren, monkeypatch):
@@ -295,8 +295,8 @@ def test_prazdna_poptavka_je_kod_2(koren):
 # ---------------------------------------------------------------- pokračování
 
 def _tovarna_selze_v_hodnoceni_1(konf, nanecisto):
-    pisatel, _ = demo_modely()
-    return pisatel, FalesnyModel({"hodnoceni_1": [ChybaModelu("sit", "OpenAI")]}, nazev="gpt-falesny")
+    pisatel, _ = demo_models()
+    return pisatel, FakeModel({"hodnoceni_1": [ModelError('network', "OpenAI")]}, name="gpt-falesny")
 
 
 def test_pokracovat_bez_hodnoty_najde_posledni(koren, monkeypatch):
@@ -311,7 +311,7 @@ def test_pokracovat_bez_hodnoty_najde_posledni(koren, monkeypatch):
     modely = []
 
     def tovarna(konf, nanecisto):
-        modely.append(demo_modely())
+        modely.append(demo_models())
         return modely[-1]
 
     assert main(["--pokracovat"], koren=koren, vstup_fn=_nepouzivat, vystup=io.StringIO(),
@@ -319,7 +319,7 @@ def test_pokracovat_bez_hodnoty_najde_posledni(koren, monkeypatch):
     beh = _jediny_beh(koren)
     assert beh.stav.stav == "dokoncen"
     pisatel = modely[0][0]
-    assert "nalezitosti" not in [krok for krok, _, _ in pisatel.volani]
+    assert "nalezitosti" not in [krok for krok, _, _ in pisatel.calls]
 
 
 def test_pokracovat_se_slozkou(koren):
@@ -373,7 +373,7 @@ def test_pokracovat_ostre_v_ukazkovem_behu_je_kod_2(koren, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-klic")
     out = io.StringIO()
     assert main(["--pokracovat", slozka.name], koren=koren, vstup_fn=_nepouzivat, vystup=out,
-                tovarna_modelu=lambda konf, n: demo_modely()) == 2
+                tovarna_modelu=lambda konf, n: demo_models()) == 2
     assert "ukázkový" in out.getvalue() and "--nanecisto" in out.getvalue()
     assert Beh.otevri(slozka).stav.stav == "prerusen"
 
@@ -391,7 +391,7 @@ def test_pokracovat_bez_hodnoty_preskoci_beh_jineho_rezimu(koren, monkeypatch):
     ostry = _preruseny_ostry(koren, monkeypatch)
     ukazkovy = _preruseny_ukazkovy(koren)   # novější
     assert main(["--pokracovat"], koren=koren, vstup_fn=_nepouzivat, vystup=io.StringIO(),
-                tovarna_modelu=lambda konf, n: demo_modely()) == 0
+                tovarna_modelu=lambda konf, n: demo_models()) == 0
     assert Beh.otevri(ostry).stav.stav == "dokoncen"
     assert Beh.otevri(ukazkovy).stav.stav == "prerusen"
     assert main(["--nanecisto", "--pokracovat"], koren=koren, vstup_fn=_nepouzivat,
@@ -405,7 +405,7 @@ def test_pokracovat_bez_hodnoty_jen_beh_jineho_rezimu_je_kod_2(koren):
     out = io.StringIO()
     try:
         assert main(["--pokracovat"], koren=koren, vstup_fn=_nepouzivat, vystup=out,
-                    tovarna_modelu=lambda konf, n: demo_modely()) == 2
+                    tovarna_modelu=lambda konf, n: demo_models()) == 2
     finally:
         os.environ.pop("ANTHROPIC_API_KEY", None)
         os.environ.pop("OPENAI_API_KEY", None)
@@ -421,7 +421,7 @@ def test_pokracovat_bere_modely_z_aktualniho_nastaveni(koren, monkeypatch):
 
     def tovarna(konf, n):
         konfigurace.append(konf)
-        return demo_modely()
+        return demo_models()
 
     assert main(["--pokracovat"], koren=koren, vstup_fn=_nepouzivat, vystup=io.StringIO(),
                 tovarna_modelu=tovarna) == 0

@@ -7,9 +7,9 @@ import pytest
 import refiner.aplikace as aplikace
 from refiner.aplikace import dokonci, najdi_posledni_beh, obnov_beh, otevri_dokonceny, zahaj_beh
 from refiner.beh import Beh
-from refiner.modely.chyby import ChybaModelu
-from refiner.modely.falesne import FalesnyModel
-from refiner.vstup import ChybaVstupu
+from refiner.models.errors import ModelError
+from refiner.models.fakes import FakeModel
+from refiner.input import InputError
 from tests.pomocne import POPTAVKA_TEST, hodnoceni, odpovedi_skriptu, skript
 
 T = datetime(2026, 10, 17, 9, 0)
@@ -148,11 +148,11 @@ def test_obnoveni_s_vadnym_nastavenim_v_repozitari_pouzije_kopii(koren, pokazit)
 
 def test_obnoveni_rezim_musi_odpovidat(koren):
     beh, _ = _zahaj(koren)
-    with pytest.raises(ChybaVstupu, match="--nanecisto"):
+    with pytest.raises(InputError, match="--nanecisto"):
         obnov_beh(beh.slozka, nanecisto=True)
     demo, _ = zahaj_beh(koren, koren / "input" / "poptavka.md", "nabidka", T, nanecisto=True)
     assert demo.stav.nanecisto
-    with pytest.raises(ChybaVstupu, match="ukázkový"):
+    with pytest.raises(InputError, match="ukázkový"):
         obnov_beh(demo.slozka, nanecisto=False)
     assert obnov_beh(demo.slozka, nanecisto=True)[0].slozka == demo.slozka
 
@@ -160,19 +160,19 @@ def test_obnoveni_rezim_musi_odpovidat(koren):
 def test_porovnani_odmitne_ukazkovy_beh(koren):
     demo, z = zahaj_beh(koren, koren / "input" / "poptavka.md", "nabidka", T, nanecisto=True)
     assert dokonci(demo, z, *skript([9.5]), hlaseni=lambda _: None, sablona=None) == 0
-    with pytest.raises(ChybaVstupu, match="ukázkový"):
+    with pytest.raises(InputError, match="ukázkový"):
         otevri_dokonceny(demo.slozka, nanecisto=False)
 
 
 def test_obnoveni_dokonceneho_behu_odmitne(koren):
     beh, z = _zahaj(koren)
     assert dokonci(beh, z, *skript([9.5]), hlaseni=lambda _: None, sablona=None) == 0
-    with pytest.raises(ChybaVstupu, match="je už dokončený"):
+    with pytest.raises(InputError, match="je už dokončený"):
         obnov_beh(beh.slozka)
 
 
 def test_obnoveni_slozky_ktera_neni_beh(tmp_path):
-    with pytest.raises(ChybaVstupu):
+    with pytest.raises(InputError):
         obnov_beh(tmp_path)
 
 
@@ -194,7 +194,7 @@ def test_dokonci_uspech(koren):
 def test_chyba_api_ulozi_rozpracovany_beh(koren):
     beh, z = _zahaj(koren)
     pisatel, _ = skript([9.5])
-    hodnotitel = FalesnyModel({"hodnoceni_1": [ChybaModelu("kredit", "OpenAI")]}, nazev="gpt-falesny")
+    hodnotitel = FakeModel({"hodnoceni_1": [ModelError('credit', "OpenAI")]}, name="gpt-falesny")
     out: list[str] = []
     assert dokonci(beh, z, pisatel, hodnotitel, hlaseni=out.append, sablona=None) == 1
     st = Beh.otevri(beh.slozka).stav
@@ -203,15 +203,15 @@ def test_chyba_api_ulozi_rozpracovany_beh(koren):
     assert "pokracovat.bat" in vypis and (beh.slozka / "prehled.html").exists()
     assert "Došel kredit u OpenAI" in vypis and str(beh.slozka) in vypis
     assert "Běh byl přerušen" in (beh.slozka / "prehled.html").read_text(encoding="utf-8")
-    assert "ChybaModelu" in (beh.slozka / "data" / "beh.log").read_text(encoding="utf-8")
+    assert "ModelError" in (beh.slozka / "data" / "beh.log").read_text(encoding="utf-8")
 
 
 def test_surova_odpoved_se_ulozi(koren):
     beh, z = _zahaj(koren)
     pisatel, _ = skript([9.5])
     # nevalidní výstup kroky jednou opraví; až druhé selhání ukončí krok
-    chyba = ChybaModelu("nevalidni_vystup", "OpenAI", surova_odpoved="{rozbite")
-    hodnotitel = FalesnyModel({"hodnoceni_1": [chyba, chyba]}, nazev="gpt-falesny")
+    chyba = ModelError('invalid_output', "OpenAI", raw_response="{rozbite")
+    hodnotitel = FakeModel({"hodnoceni_1": [chyba, chyba]}, name="gpt-falesny")
     assert dokonci(beh, z, pisatel, hodnotitel, hlaseni=lambda _: None, sablona=None) == 1
     soubory = list((beh.slozka / "data").glob("surova_odpoved_*.txt"))
     assert len(soubory) == 1
@@ -219,11 +219,11 @@ def test_surova_odpoved_se_ulozi(koren):
 
 
 def test_spotreba_neplatne_odpovedi_se_ulozi(koren):
-    # Hodnotitel 2× odpoví (spotřeba vznikne), ale skóre 9,8 neprojde kontrolou → ChybaModelu.
+    # Hodnotitel 2× odpoví (spotřeba vznikne), ale skóre 9,8 neprojde kontrolou → ModelError.
     beh, z = _zahaj(koren)
     pisatel, _ = skript([9.5])
     spatne = hodnoceni(8.0, prepsat={"B1": 9.8})
-    hodnotitel = FalesnyModel({"hodnoceni_1": [spatne, spatne]}, nazev="gpt-falesny")
+    hodnotitel = FakeModel({"hodnoceni_1": [spatne, spatne]}, name="gpt-falesny")
     assert dokonci(beh, z, pisatel, hodnotitel, hlaseni=lambda _: None, sablona=None) == 1
     st = Beh.otevri(beh.slozka).stav
     assert [s.krok for s in st.spotreba if s.model == "gpt-falesny"] == ["hodnoceni_1", "hodnoceni_1"]
@@ -234,8 +234,8 @@ def test_ctrl_c_ulozi_prerusen_beh(koren):
     beh, z = _zahaj(koren)
     odp_p, odp_h = odpovedi_skriptu([9.5])
     odp_p["navrh_1"] = [KeyboardInterrupt(), *odp_p["navrh_1"]]
-    pisatel = FalesnyModel(odp_p, nazev="claude-falesny")
-    hodnotitel = FalesnyModel(odp_h, nazev="gpt-falesny")
+    pisatel = FakeModel(odp_p, name="claude-falesny")
+    hodnotitel = FakeModel(odp_h, name="gpt-falesny")
     out: list[str] = []
 
     assert dokonci(beh, z, pisatel, hodnotitel, hlaseni=out.append, sablona=None) == 1
@@ -254,7 +254,7 @@ def test_ctrl_c_ulozi_prerusen_beh(koren):
 
 def test_neocekavana_vyjimka(koren):
     beh, z = _zahaj(koren)
-    pisatel = FalesnyModel({"nalezitosti": [ZeroDivisionError("deleni nulou")]}, nazev="claude-falesny")
+    pisatel = FakeModel({"nalezitosti": [ZeroDivisionError("deleni nulou")]}, name="claude-falesny")
     _, hodnotitel = skript([9.5])
     out: list[str] = []
     assert dokonci(beh, z, pisatel, hodnotitel, hlaseni=out.append, sablona=None) == 1
@@ -272,7 +272,7 @@ def test_selhani_prehledu_neprebije_puvodni_chybu(koren, monkeypatch):
     monkeypatch.setattr(aplikace, "vytvor_prehled", rozbity)
     beh, z = _zahaj(koren)
     pisatel, _ = skript([9.5])
-    hodnotitel = FalesnyModel({"hodnoceni_1": [ChybaModelu("kredit", "OpenAI")]}, nazev="gpt-falesny")
+    hodnotitel = FakeModel({"hodnoceni_1": [ModelError('credit', "OpenAI")]}, name="gpt-falesny")
     out: list[str] = []
     assert dokonci(beh, z, pisatel, hodnotitel, hlaseni=out.append, sablona=None) == 1
     st = Beh.otevri(beh.slozka).stav

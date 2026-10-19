@@ -20,11 +20,11 @@ from refiner.konfigurace import (
     nacti_nastaveni,
 )
 from refiner.kroky import Zdroje
-from refiner.modely.chyby import ChybaModelu
-from refiner.modely.rozhrani import Model
+from refiner.models.errors import ModelError
+from refiner.models.interface import Model
 from refiner.porovnani import PROMPTY_POROVNANI, porovnej
 from refiner.smycka import spust_smycku
-from refiner.vstup import ChybaVstupu, nacti_jako_markdown, nacti_podklady
+from refiner.input import InputError, read_as_markdown, read_materials
 from refiner.vystup.docx import exportuj_docx
 from refiner.vystup.prehled import vytvor_prehled
 
@@ -110,8 +110,8 @@ def zahaj_beh(koren: Path, vstup: Path, profil: str, ted: datetime,
     kriteria = cesta_kriterii_k_poptavce(vstup)
     # Chyby konfigurace a vstupu se ohlásí dřív, než vznikne složka běhu.
     nacti_konfiguraci(nastaveni, soubor_profilu, kriteria)
-    poptavka = nacti_jako_markdown(vstup)
-    podklady = nacti_podklady(koren / "podklady")
+    poptavka = read_as_markdown(vstup)
+    podklady = read_materials(koren / "podklady")
 
     beh = Beh.novy(koren / "output", vstup.name, profil, ted, nanecisto=nanecisto)
     konf_slozka = beh.slozka / SLOZKA_KONFIGURACE
@@ -128,11 +128,11 @@ def zahaj_beh(koren: Path, vstup: Path, profil: str, ted: datetime,
 
 def _otevri(slozka: Path) -> Beh:
     if not (slozka / _STAV).is_file():
-        raise ChybaVstupu(f"Složka {slozka} není složka běhu (chybí {_STAV}).")
+        raise InputError(f"Složka {slozka} není složka běhu (chybí {_STAV}).")
     try:
         return Beh.otevri(slozka)
     except (OSError, ValidationError) as e:
-        raise ChybaVstupu(f"Stav běhu ve složce {slozka} nelze přečíst ({_STAV}).") from e
+        raise InputError(f"Stav běhu ve složce {slozka} nelze přečíst ({_STAV}).") from e
 
 
 def obnov_beh(
@@ -148,14 +148,14 @@ def obnov_beh(
     """
     beh = _otevri(slozka)
     if beh.stav.stav == "dokoncen":
-        raise ChybaVstupu(f"Běh {slozka.name} je už dokončený.")
+        raise InputError(f"Běh {slozka.name} je už dokončený.")
     if not beh.hotovo("poptavka"):
-        raise ChybaVstupu(f"Běh {slozka.name} nelze obnovit: chybí uložená poptávka.")
+        raise InputError(f"Běh {slozka.name} nelze obnovit: chybí uložená poptávka.")
     if nanecisto is not None and beh.stav.nanecisto != nanecisto:
         if beh.stav.nanecisto:
-            raise ChybaVstupu(f"Běh {slozka.name} je ukázkový (--nanecisto, falešné modely); "
+            raise InputError(f"Běh {slozka.name} je ukázkový (--nanecisto, falešné modely); "
                               "pokračovat v něm lze jen s volbou --nanecisto.")
-        raise ChybaVstupu(f"Běh {slozka.name} je ostrý běh se skutečnými modely; s volbou --nanecisto "
+        raise InputError(f"Běh {slozka.name} je ostrý běh se skutečnými modely; s volbou --nanecisto "
                           "v něm pokračovat nelze. Spusťte pokracovat.bat bez --nanecisto.")
     return beh, _nacti_zdroje(beh, koren, hlaseni)
 
@@ -172,12 +172,12 @@ def otevri_dokonceny(
     """
     beh = _otevri(slozka)
     if beh.stav.stav != "dokoncen":
-        raise ChybaVstupu(f"Běh {slozka.name} není dokončený; porovnat lze jen dokončený běh.")
+        raise InputError(f"Běh {slozka.name} není dokončený; porovnat lze jen dokončený běh.")
     if nanecisto is not None and beh.stav.nanecisto != nanecisto:
         if beh.stav.nanecisto:
-            raise ChybaVstupu(f"Běh {slozka.name} je ukázkový (--nanecisto) s falešnými texty; "
+            raise InputError(f"Běh {slozka.name} je ukázkový (--nanecisto) s falešnými texty; "
                               "s referencí ho porovnat nelze.")
-        raise ChybaVstupu(f"Běh {slozka.name} je ostrý běh; v ukázkovém režimu ho porovnat nelze.")
+        raise InputError(f"Běh {slozka.name} je ostrý běh; v ukázkovém režimu ho porovnat nelze.")
     return beh, _nacti_zdroje(beh, koren, hlaseni)
 
 
@@ -229,7 +229,7 @@ def _preruseni(
     """Uloží běh jako přerušený, zkusí vytvořit přehled a ohlásí, jak pokračovat. Vrací 1."""
     try:
         # Spotřeba volání, která vrátila odpověď, ale krok pak neprošel kontrolou.
-        zbytek = pisatel.vyzvedni_spotrebu() + hodnotitel.vyzvedni_spotrebu()
+        zbytek = pisatel.take_usage() + hodnotitel.take_usage()
         if zbytek:
             beh.pridej_spotrebu(zbytek)
     except Exception:
@@ -270,11 +270,11 @@ def _dokonci(
         _log.info("Běh dokončen (%s, finální verze %d).", vysledek.duvod, vysledek.finalni_verze)
         hlaseni(f"Hotovo. Přehled běhu: {prehled}")
         return 0
-    except ChybaModelu as e:
-        _log.exception("Chyba modelu: %s", e.hlaska)
-        if e.surova_odpoved is not None:
-            beh.zapis_pevny(f"data/surova_odpoved_{datetime.now():%Y%m%d_%H%M%S}.txt", e.surova_odpoved)
-        return _preruseni(beh, zdroje, pisatel, hodnotitel, hlaseni, e.hlaska)
+    except ModelError as e:
+        _log.exception("Chyba modelu: %s", e.message)
+        if e.raw_response is not None:
+            beh.zapis_pevny(f"data/surova_odpoved_{datetime.now():%Y%m%d_%H%M%S}.txt", e.raw_response)
+        return _preruseni(beh, zdroje, pisatel, hodnotitel, hlaseni, e.message)
     except KeyboardInterrupt:
         _log.exception(HLASKA_CTRL_C)
         return _preruseni(beh, zdroje, pisatel, hodnotitel, hlaseni, HLASKA_CTRL_C)
@@ -338,13 +338,13 @@ def porovnej_beh(
         except ChybaKonfigurace as e:
             hlaseni(str(e))
             return 2
-        except ChybaModelu as e:
-            _log.exception("Chyba modelu při porovnání: %s", e.hlaska)
-            if e.surova_odpoved is not None:
+        except ModelError as e:
+            _log.exception("Chyba modelu při porovnání: %s", e.message)
+            if e.raw_response is not None:
                 beh.zapis_pevny(f"data/surova_odpoved_porovnani_{datetime.now():%Y%m%d_%H%M%S}.txt",
-                                e.surova_odpoved)
+                                e.raw_response)
             # Hlášky chyb radí pokracovat.bat; dokončený běh se ale porovnává znovu přes porovnat.bat.
-            hlaseni(e.hlaska.replace("pokracovat.bat", "porovnat.bat"))
+            hlaseni(e.message.replace("pokracovat.bat", "porovnat.bat"))
             hlaseni(HLASKA_POROVNAT_ZNOVU)
             return 1
         except KeyboardInterrupt:

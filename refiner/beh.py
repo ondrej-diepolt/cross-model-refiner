@@ -9,7 +9,7 @@ from typing import Literal, TypeVar
 from pydantic import BaseModel
 
 from refiner.data import Spotreba, VysledekSkore
-from refiner.vstup import slug
+from refiner.input import slug
 
 SLOZKA_KONFIGURACE = "data/konfigurace"
 _STAV_SOUBOR = "data/beh.json"

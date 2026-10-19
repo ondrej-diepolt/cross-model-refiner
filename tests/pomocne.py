@@ -19,7 +19,7 @@ from refiner.data import (
 )
 from refiner.konfigurace import Nastaveni, nacti_konfiguraci
 from refiner.kroky import Zdroje
-from refiner.modely.falesne import FalesnyModel
+from refiner.models.fakes import FakeModel
 
 KOREN = Path(__file__).parent.parent
 
@@ -131,7 +131,7 @@ def odpovedi_skriptu(
 
 def skript(
     skore_po_hodnocenich: list[float], rozhodnuti: str = "prijato"
-) -> tuple[FalesnyModel, FalesnyModel]:
+) -> tuple[FakeModel, FakeModel]:
     """Falešný pisatel a hodnotitel; hodnocení k má všem kritériím skore_po_hodnocenich[k-1]."""
     pisatel, hodnotitel = odpovedi_skriptu(skore_po_hodnocenich, rozhodnuti)
-    return FalesnyModel(pisatel, nazev="claude-falesny"), FalesnyModel(hodnotitel, nazev="gpt-falesny")
+    return FakeModel(pisatel, name="claude-falesny"), FakeModel(hodnotitel, name="gpt-falesny")

@@ -35,20 +35,20 @@ from refiner.konfigurace import (
     nacti_konfiguraci,
     nacti_nastaveni,
 )
-from refiner.modely.chyby import ChybaModelu, Sluzba
-from refiner.modely.claude import ClaudeModel
-from refiner.modely.claude_cli import ClaudeCliModel
-from refiner.modely.codex_cli import CodexModel
-from refiner.modely.falesne import demo_modely
-from refiner.modely.gpt import GptModel
-from refiner.modely.rozhrani import Model
+from refiner.models.errors import ModelError, Service
+from refiner.models.claude import ClaudeModel
+from refiner.models.claude_cli import ClaudeCliModel
+from refiner.models.codex_cli import CodexModel
+from refiner.models.fakes import demo_models
+from refiner.models.gpt import GptModel
+from refiner.models.interface import Model
 from refiner.porovnani import nacti_referenci, najdi_referenci
-from refiner.vstup import ChybaVstupu, najdi_vstupy
+from refiner.input import InputError, find_inputs
 
 KOREN = Path(__file__).resolve().parent.parent
 
-KLICE: tuple[tuple[str, Sluzba], ...] = (("ANTHROPIC_API_KEY", "Anthropic"), ("OPENAI_API_KEY", "OpenAI"))
-KLIC_HODNOTITELE: tuple[tuple[str, Sluzba], ...] = (("OPENAI_API_KEY", "OpenAI"),)
+KLICE: tuple[tuple[str, Service], ...] = (("ANTHROPIC_API_KEY", "Anthropic"), ("OPENAI_API_KEY", "OpenAI"))
+KLIC_HODNOTITELE: tuple[tuple[str, Service], ...] = (("OPENAI_API_KEY", "OpenAI"),)
 
 HLASKA_VZOR_ENV = "Vzor najdete v souboru .env.example."
 HLASKA_ENV_KODOVANI = "Soubor .env nelze přečíst – uložte ho v kódování UTF-8."
@@ -140,7 +140,7 @@ def _vyber(konzole: _Konzole, vstup_fn: Callable[[str], str], otazka: str, mozno
 
 def _vychozi_tovarna(konfigurace: Konfigurace, nanecisto: bool) -> tuple[Model, Model]:
     if nanecisto:
-        return demo_modely()
+        return demo_models()
     modely = konfigurace.nastaveni.modely
     if modely.rezim == "api":
         return ClaudeModel(modely), GptModel(modely)
@@ -152,7 +152,7 @@ def _vychozi_hodnotitel(konfigurace: Konfigurace) -> Model:
     return GptModel(modely) if modely.rezim == "api" else CodexModel(modely)
 
 
-def _chybejici_klice(klice: tuple[tuple[str, Sluzba], ...] = KLICE) -> list[Sluzba]:
+def _chybejici_klice(klice: tuple[tuple[str, Service], ...] = KLICE) -> list[Service]:
     return [sluzba for promenna, sluzba in klice if not os.environ.get(promenna, "").strip()]
 
 
@@ -176,9 +176,9 @@ def _zvol_profil(koren: Path, konzole: _Konzole, vstup_fn: Callable[[str], str])
 
 def _zvol_vstup(koren: Path, konzole: _Konzole, vstup_fn: Callable[[str], str]) -> Path:
     slozka = koren / "input"
-    vstupy = najdi_vstupy(slozka) if slozka.is_dir() else []
+    vstupy = find_inputs(slozka) if slozka.is_dir() else []
     if not vstupy:
-        raise ChybaVstupu(HLASKA_ZADNY_VSTUP)
+        raise InputError(HLASKA_ZADNY_VSTUP)
     if len(vstupy) == 1:
         return vstupy[0]
     return vstupy[_vyber(konzole, vstup_fn, "Kterou poptávku zpracovat?", [p.name for p in vstupy])]
@@ -284,7 +284,7 @@ def _spust(
         if rezim == "api":
             chybi = _chybejici_klice(KLIC_HODNOTITELE if porovnat else KLICE)
             for sluzba in chybi:
-                konzole(f"{ChybaModelu('klic', sluzba).hlaska} {HLASKA_VZOR_ENV}")
+                konzole(f"{ModelError('authentication', sluzba).message} {HLASKA_VZOR_ENV}")
             if chybi:
                 return 2
 
@@ -322,11 +322,11 @@ def _spust(
             konzole(f"Poptávka: {vstup.name}, profil: {konfigurace.profil.nazev}")
             beh, zdroje = zahaj_beh(koren, vstup, profil, datetime.now(), nanecisto=args.nanecisto)
             konzole(f"Složka běhu: {beh.slozka}")
-    except (ChybaKonfigurace, ChybaVstupu) as e:
+    except (ChybaKonfigurace, InputError) as e:
         konzole(str(e))
         return 2
-    except ChybaModelu as e:
-        konzole(e.hlaska)
+    except ModelError as e:
+        konzole(e.message)
         return 2
     except EOFError:
         konzole(HLASKA_KONEC_VSTUPU)

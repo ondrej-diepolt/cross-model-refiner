@@ -6,85 +6,85 @@ from types import SimpleNamespace
 
 import pytest
 
-from refiner.data import Spotreba, VystupNalezitosti
-from refiner.konfigurace import nacti_nastaveni
-from refiner.kroky import s_opravou
-from refiner.modely.chyby import ChybaModelu
-from refiner.modely.claude_cli import ClaudeCliModel, druh_chyby_claude
-from refiner.modely.podproces import VyprselCas, Vysledek
+from refiner.data import Spotreba as TokenUsage, VystupNalezitosti as RequirementsOutput
+from refiner.konfigurace import nacti_nastaveni as load_settings
+from refiner.kroky import s_opravou as with_repair
+from refiner.models.errors import ModelError
+from refiner.models.claude_cli import ClaudeCliModel, claude_error_kind
+from refiner.models.subprocess import ProcessTimeout, ProcessResult
 
-KOREN = Path(__file__).parent.parent
+ROOT = Path(__file__).parent.parent
 
-NALEZITOSTI = {"nalezitosti": [{"id": "N1", "text": "Metodika", "citace": "popis metodiky"}]}
+REQUIREMENTS = {"nalezitosti": [{"id": "N1", "text": "Metodika", "citace": "popis metodiky"}]}
 USAGE = {"input_tokens": 100, "output_tokens": 50, "cache_read_input_tokens": 30,
          "cache_creation_input_tokens": 20}
 OK_JSON = {"type": "result", "subtype": "success", "is_error": False, "result": "hotovo",
-           "structured_output": NALEZITOSTI, "stop_reason": "end_turn", "usage": USAGE}
-AUTH_OK = Vysledek(0, json.dumps({"loggedIn": True, "authMethod": "claude.ai",
+           "structured_output": REQUIREMENTS, "stop_reason": "end_turn", "usage": USAGE}
+AUTH_OK = ProcessResult(0, json.dumps({"loggedIn": True, "authMethod": "claude.ai",
                                   "apiProvider": "firstParty"}), "")
 
 
-def ok(**zmeny) -> Vysledek:
-    return Vysledek(0, json.dumps({**OK_JSON, **zmeny}), "")
+def ok(**changes) -> ProcessResult:
+    return ProcessResult(0, json.dumps({**OK_JSON, **changes}), "")
 
 
-def nastaveni():
-    return nacti_nastaveni(KOREN / "nastaveni.yaml").modely
+def settings():
+    return load_settings(ROOT / "nastaveni.yaml").modely
 
 
-class FalesnySpoustec:
-    """Odpovídá podle argv: `auth status` vrací AUTH_OK, jinak bere další odpověď z fronty."""
+class FakeRunner:
+    """Dispatch by argv: auth status returns AUTH_OK; other calls consume queued responses."""
 
-    def __init__(self, *odpovedi, auth=AUTH_OK):
-        self.fronta = list(odpovedi)
+    def __init__(self, *responses, auth=AUTH_OK):
+        self.queue = list(responses)
         self.auth = auth
-        self.volani = []
-        self.auth_volani = []
+        self.calls = []
+        self.auth_calls = []
 
     def __call__(self, argv, stdin, env, cwd, timeout):
         if argv[1:3] == ["auth", "status"]:
-            self.auth_volani.append(SimpleNamespace(argv=argv, env=env, cwd=cwd, timeout=timeout))
+            self.auth_calls.append(SimpleNamespace(argv=argv, env=env, cwd=cwd, timeout=timeout))
             return self.auth
-        soubory = {}
+        files = {}
         if "--system-prompt-file" in argv:
-            slozka = Path(argv[argv.index("--system-prompt-file") + 1]).parent
-            soubory = {p.name: p.read_text(encoding="utf-8") for p in slozka.iterdir()}
-        self.volani.append(SimpleNamespace(
-            argv=argv, stdin=stdin, env=env, cwd=Path(cwd), timeout=timeout, soubory=soubory,
-            prace_obsah=list(Path(cwd).iterdir())))
-        odpoved = self.fronta.pop(0)
-        if isinstance(odpoved, Exception):
-            raise odpoved
-        return odpoved
+            directory = Path(argv[argv.index("--system-prompt-file") + 1]).parent
+            files = {p.name: p.read_text(encoding="utf-8") for p in directory.iterdir()}
+        self.calls.append(SimpleNamespace(
+            argv=argv, stdin=stdin, env=env, cwd=Path(cwd), timeout=timeout, files=files,
+            work_contents=list(Path(cwd).iterdir())))
+        response = self.queue.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
 
 
 @pytest.fixture(autouse=True)
-def _claude_v_path(monkeypatch):
+def _claude_in_path(monkeypatch):
     monkeypatch.setattr("shutil.which", lambda n: "C:/fake/claude.exe" if n == "claude" else None)
 
 
-def model(*odpovedi, **kw):
-    spoustec = FalesnySpoustec(*odpovedi, **kw)
-    return ClaudeCliModel(nastaveni(), spust=spoustec), spoustec
+def model(*responses, **kw):
+    runner = FakeRunner(*responses, **kw)
+    return ClaudeCliModel(settings(), run=runner), runner
 
 
-def volej_json(m, **kw):
-    return m.json("INSTRUKCE", "ZADANI-123", VystupNalezitosti, krok="nalezitosti", **kw)
+def call_json(m, **kw):
+    return m.json("INSTRUKCE", "ZADANI-123", RequirementsOutput, step="nalezitosti", **kw)
 
 
-def test_zadani_jen_ve_stdin_instrukce_v_souboru():
+def test_task_only_in_stdin_and_instructions_in_file():
     m, s = model(ok())
-    volej_json(m)
-    v = s.volani[0]
+    call_json(m)
+    v = s.calls[0]
     assert "ZADANI-123" in v.stdin and not any("ZADANI-123" in a for a in v.argv)
-    assert v.soubory["instrukce.md"] == "INSTRUKCE"
+    assert v.files['instructions.md'] == "INSTRUKCE"
     assert not any("INSTRUKCE" in a for a in v.argv)
 
 
-def test_prepinace_izolace():
+def test_isolation_flags():
     m, s = model(ok())
-    volej_json(m)
-    argv = s.volani[0].argv
+    call_json(m)
+    argv = s.calls[0].argv
     for p in ["-p", "--output-format", "json", "--no-session-persistence", "--safe-mode",
               "--strict-mcp-config", "--permission-prompts"]:
         assert p in argv
@@ -92,28 +92,28 @@ def test_prepinace_izolace():
     assert argv[argv.index("--disallowedTools") + 1] == "mcp__*"
     assert argv[argv.index("--model") + 1] == "claude-opus-5-5"
     schema = json.loads(argv[argv.index("--json-schema") + 1])
-    assert schema == VystupNalezitosti.model_json_schema()
+    assert schema == RequirementsOutput.model_json_schema()
 
 
-def test_model_a_effort_z_konfigurace_a_extrakce():
+def test_model_and_effort_from_configuration_and_extraction():
     m, s = model(ok(), ok(), ok(result="text"))
-    volej_json(m)
-    volej_json(m, effort="low")
-    m.text("I", "Z", krok="navrh")
-    efforty = [v.argv[v.argv.index("--effort") + 1] for v in s.volani]
-    assert efforty == ["high", "low", "high"]
-    assert "--json-schema" not in s.volani[2].argv
+    call_json(m)
+    call_json(m, effort="low")
+    m.text("I", "Z", step="navrh")
+    efforts = [v.argv[v.argv.index("--effort") + 1] for v in s.calls]
+    assert efforts == ["high", "low", "high"]
+    assert "--json-schema" not in s.calls[2].argv
 
 
-def test_env_bez_klicu(monkeypatch):
+def test_environment_without_keys(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-x")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-y")
     monkeypatch.setenv("CLAUDE_CODE_SIMPLE", "1")
     monkeypatch.setenv("CLAUDE_CODE_EFFORT_LEVEL", "low")
     monkeypatch.setenv("Anthropic_Auth_Token", "t")
     m, s = model(ok())
-    volej_json(m)
-    for env in (s.volani[0].env, s.auth_volani[0].env):
+    call_json(m)
+    for env in (s.calls[0].env, s.auth_calls[0].env):
         assert not {"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "CLAUDE_CODE_SIMPLE", "CLAUDE_CODE_EFFORT_LEVEL",
                     "ANTHROPIC_AUTH_TOKEN"} & {k.upper() for k in env}
         assert env["CLAUDE_CODE_DISABLE_CLAUDE_MDS"] == "1"
@@ -121,205 +121,205 @@ def test_env_bez_klicu(monkeypatch):
         assert env["CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS"] == "1"
 
 
-def test_cwd_prazdny_a_po_volani_smazany():
+def test_cwd_empty_and_removed_after_call():
     m, s = model(ok())
-    volej_json(m)
-    v = s.volani[0]
-    assert v.prace_obsah == [] and not v.cwd.exists()
-    assert s.volani[0].timeout == nastaveni().timeout_s
+    call_json(m)
+    v = s.calls[0]
+    assert v.work_contents == [] and not v.cwd.exists()
+    assert s.calls[0].timeout == settings().timeout_s
 
 
-def test_json_uspech_a_spotreba():
+def test_json_success_and_usage():
     m, _ = model(ok())
-    assert volej_json(m) == VystupNalezitosti.model_validate(NALEZITOSTI)
-    assert m.vyzvedni_spotrebu() == [Spotreba(krok="nalezitosti", model="claude-opus-5-5", vstup=100,
+    assert call_json(m) == RequirementsOutput.model_validate(REQUIREMENTS)
+    assert m.take_usage() == [TokenUsage(krok="nalezitosti", model="claude-opus-5-5", vstup=100,
                                               vystup=50, cache_cteni=30, cache_zapis=20, predplatne=True)]
-    assert m.vyzvedni_spotrebu() == []
+    assert m.take_usage() == []
 
 
-def test_text_vraci_result():
+def test_text_returns_result():
     m, _ = model(ok(result="Ahoj světe"))
-    assert m.text("I", "Z", krok="navrh") == "Ahoj světe"
+    assert m.text("I", "Z", step="navrh") == "Ahoj světe"
 
 
-def test_json_bez_structured_output_je_nevalidni():
-    odp = {k: v for k, v in OK_JSON.items() if k != "structured_output"}
-    m, _ = model(Vysledek(0, json.dumps(odp), ""))
-    with pytest.raises(ChybaModelu) as e:
-        volej_json(m)
-    assert e.value.druh == "nevalidni_vystup" and e.value.sluzba == "Claude Code"
+def test_json_without_structured_output_is_invalid():
+    response = {k: v for k, v in OK_JSON.items() if k != "structured_output"}
+    m, _ = model(ProcessResult(0, json.dumps(response), ""))
+    with pytest.raises(ModelError) as e:
+        call_json(m)
+    assert e.value.kind == 'invalid_output' and e.value.service == "Claude Code"
 
 
-def test_json_vycerpane_pokusy_schematu_je_nevalidni():
-    odp = {"type": "result", "subtype": "error_max_structured_output_retries", "is_error": True,
+def test_json_exhausted_schema_retries_is_invalid():
+    response = {"type": "result", "subtype": "error_max_structured_output_retries", "is_error": True,
            "errors": ["x"], "usage": USAGE}
-    m, _ = model(Vysledek(1, json.dumps(odp), ""))
-    with pytest.raises(ChybaModelu) as e:
-        volej_json(m)
-    assert e.value.druh == "nevalidni_vystup"
-    assert len(m.vyzvedni_spotrebu()) == 1   # tokeny se platí i při chybě
+    m, _ = model(ProcessResult(1, json.dumps(response), ""))
+    with pytest.raises(ModelError) as e:
+        call_json(m)
+    assert e.value.kind == 'invalid_output'
+    assert len(m.take_usage()) == 1   # tokens are billed on errors too
 
 
-def test_json_neplatny_vuci_schematu_vede_na_opravu():
-    spatne = ok(structured_output={"nalezitosti": "ne seznam"})
-    m, s = model(spatne, ok())
-    v = s_opravou(m, "ZADANI", lambda z: m.json("I", z, VystupNalezitosti, krok="nalezitosti"),
+def test_json_schema_failure_triggers_repair():
+    invalid = ok(structured_output={"nalezitosti": "ne seznam"})
+    m, s = model(invalid, ok())
+    v = with_repair(m, "ZADANI", lambda z: m.json("I", z, RequirementsOutput, step="nalezitosti"),
                   lambda _: [], lambda _: "")
-    assert v == VystupNalezitosti.model_validate(NALEZITOSTI) and len(s.volani) == 2
-    assert "## Oprava" in s.volani[1].stdin
+    assert v == RequirementsOutput.model_validate(REQUIREMENTS) and len(s.calls) == 2
+    assert "## Oprava" in s.calls[1].stdin
 
 
-def test_uriznuto_a_odmitnuti():
+def test_truncation_and_refusal():
     m, _ = model(ok(stop_reason="max_tokens"), ok(stop_reason="refusal"))
-    with pytest.raises(ChybaModelu) as e:
-        volej_json(m)
-    assert e.value.druh == "uriznuto" and "uříznutá" in e.value.hlaska
-    with pytest.raises(ChybaModelu) as e:
-        volej_json(m)
-    assert e.value.druh == "odmitnuti"
+    with pytest.raises(ModelError) as e:
+        call_json(m)
+    assert e.value.kind == 'truncated' and "uříznutá" in e.value.message
+    with pytest.raises(ModelError) as e:
+        call_json(m)
+    assert e.value.kind == 'refused'
 
 
-@pytest.mark.parametrize("text,druh", [
-    ("Not logged in · Please run /login", "neprihlasen"),
-    ("Login expired · Please run /login", "neprihlasen"),
-    ("Failed to authenticate. API Error: 401 OAuth token has expired", "neprihlasen"),
-    ("You've hit your session limit · resets 3:45pm", "limit_predplatneho"),
-    ("You've hit your weekly limit · resets Mon 12:00am", "limit_predplatneho"),
-    ("Request rejected (429)", "pretizeni"),
-    ("Server is temporarily limiting requests", "pretizeni"),
-    ("Claude Opus is not available with the Claude Pro plan", "model_nedostupny"),
-    ("Model claude-x is not a recognized model id", "model_nedostupny"),
+@pytest.mark.parametrize('text,kind', [
+    ("Not logged in · Please run /login", 'not_authenticated'),
+    ("Login expired · Please run /login", 'not_authenticated'),
+    ("Failed to authenticate. API Error: 401 OAuth token has expired", 'not_authenticated'),
+    ("You've hit your session limit · resets 3:45pm", 'subscription_limit'),
+    ("You've hit your weekly limit · resets Mon 12:00am", 'subscription_limit'),
+    ("Request rejected (429)", 'overloaded'),
+    ("Server is temporarily limiting requests", 'overloaded'),
+    ("Claude Opus is not available with the Claude Pro plan", 'model_unavailable'),
+    ("Model claude-x is not a recognized model id", 'model_unavailable'),
     ("něco úplně jiného", None),
 ])
-def test_druh_chyby_claude(text, druh):
-    assert druh_chyby_claude(text) == druh
+def test_claude_error_kind(text, kind):
+    assert claude_error_kind(text) == kind
 
 
-@pytest.mark.parametrize("text,druh", [
-    ("Not logged in · Please run /login", "neprihlasen"),
-    ("You've hit your session limit · resets 3:45pm", "limit_predplatneho"),
-    ("Claude Opus is not available with the Claude Pro plan", "model_nedostupny"),
-    ("Request rejected (429)", "pretizeni"),
+@pytest.mark.parametrize('text,kind', [
+    ("Not logged in · Please run /login", 'not_authenticated'),
+    ("You've hit your session limit · resets 3:45pm", 'subscription_limit'),
+    ("Claude Opus is not available with the Claude Pro plan", 'model_unavailable'),
+    ("Request rejected (429)", 'overloaded'),
 ])
-def test_holy_text_s_nenulovym_kodem(text, druh):
-    m, _ = model(Vysledek(1, text, ""))
-    with pytest.raises(ChybaModelu) as e:
-        volej_json(m)
-    assert e.value.druh == druh and e.value.sluzba == "Claude Code"
+def test_plain_text_with_nonzero_returncode(text, kind):
+    m, _ = model(ProcessResult(1, text, ""))
+    with pytest.raises(ModelError) as e:
+        call_json(m)
+    assert e.value.kind == kind and e.value.service == "Claude Code"
 
 
-def test_limit_a_model_nesou_detail():
-    m, _ = model(Vysledek(1, "You've hit your session limit · resets 3:45pm", ""),
-                 Vysledek(1, "Claude Opus is not available with the Claude Pro plan", ""))
-    with pytest.raises(ChybaModelu) as e:
-        volej_json(m)
-    assert "resets 3:45pm" in e.value.hlaska
-    with pytest.raises(ChybaModelu) as e:
-        volej_json(m)
-    assert "claude-opus-5-5" in e.value.hlaska
+def test_limit_and_model_include_detail():
+    m, _ = model(ProcessResult(1, "You've hit your session limit · resets 3:45pm", ""),
+                 ProcessResult(1, "Claude Opus is not available with the Claude Pro plan", ""))
+    with pytest.raises(ModelError) as e:
+        call_json(m)
+    assert "resets 3:45pm" in e.value.message
+    with pytest.raises(ModelError) as e:
+        call_json(m)
+    assert "claude-opus-5-5" in e.value.message
 
 
-def test_chyba_v_json_obalce_se_mapuje():
-    odp = {"type": "result", "subtype": "success", "is_error": True, "usage": USAGE,
+def test_json_envelope_error_is_mapped():
+    response = {"type": "result", "subtype": "success", "is_error": True, "usage": USAGE,
            "result": "You've hit your weekly limit · resets Mon 12:00am"}
-    m, _ = model(Vysledek(1, json.dumps(odp), ""))
-    with pytest.raises(ChybaModelu) as e:
-        volej_json(m)
-    assert e.value.druh == "limit_predplatneho"
+    m, _ = model(ProcessResult(1, json.dumps(response), ""))
+    with pytest.raises(ModelError) as e:
+        call_json(m)
+    assert e.value.kind == 'subscription_limit'
 
 
-def test_chyba_site_je_sit():
-    odp = {"type": "result", "subtype": "error_during_execution", "is_error": True, "usage": USAGE,
+def test_connection_error_is_network():
+    response = {"type": "result", "subtype": "error_during_execution", "is_error": True, "usage": USAGE,
            "result": "API Error: connect ECONNRESET"}
-    m, _ = model(Vysledek(1, json.dumps(odp), ""))
-    with pytest.raises(ChybaModelu) as e:
-        volej_json(m)
-    assert e.value.druh == "sit"
+    m, _ = model(ProcessResult(1, json.dumps(response), ""))
+    with pytest.raises(ModelError) as e:
+        call_json(m)
+    assert e.value.kind == 'network'
 
 
-def test_neznama_chyba_je_jina_bez_klicu():
-    m, _ = model(Vysledek(1, "boom sk-abc123", "stderr sk-def456"))
-    with pytest.raises(ChybaModelu) as e:
-        volej_json(m)
-    assert e.value.druh == "jina" and "sk-abc123" not in e.value.hlaska and "sk-def456" not in e.value.hlaska
+def test_unknown_error_is_other_without_keys():
+    m, _ = model(ProcessResult(1, "boom sk-abc123", "stderr sk-def456"))
+    with pytest.raises(ModelError) as e:
+        call_json(m)
+    assert e.value.kind == 'other' and "sk-abc123" not in e.value.message and "sk-def456" not in e.value.message
 
 
-def test_nejson_s_kodem_nula_je_jina():
-    m, _ = model(Vysledek(0, "to není json", ""))
-    with pytest.raises(ChybaModelu) as e:
-        volej_json(m)
-    assert e.value.druh == "jina"
+def test_non_json_with_zero_returncode_is_other():
+    m, _ = model(ProcessResult(0, "to není json", ""))
+    with pytest.raises(ModelError) as e:
+        call_json(m)
+    assert e.value.kind == 'other'
 
 
 def test_timeout():
-    m, _ = model(VyprselCas())
-    with pytest.raises(ChybaModelu) as e:
-        volej_json(m)
-    assert e.value.druh == "timeout" and e.value.sluzba == "Claude Code"
+    m, _ = model(ProcessTimeout())
+    with pytest.raises(ModelError) as e:
+        call_json(m)
+    assert e.value.kind == 'timeout' and e.value.service == "Claude Code"
 
 
-def test_nenainstalovano_v_path(monkeypatch):
+def test_not_installed_in_path(monkeypatch):
     monkeypatch.setattr("shutil.which", lambda _: None)
-    with pytest.raises(ChybaModelu) as e:
-        ClaudeCliModel(nastaveni(), spust=FalesnySpoustec())
-    assert e.value.druh == "nenainstalovano" and "příkaz claude nebyl nalezen" in e.value.hlaska
+    with pytest.raises(ModelError) as e:
+        ClaudeCliModel(settings(), run=FakeRunner())
+    assert e.value.kind == 'not_installed' and "příkaz claude nebyl nalezen" in e.value.message
 
 
-def test_nenainstalovano_pri_spusteni():
+def test_not_installed_at_execution():
     m, _ = model(FileNotFoundError())
-    with pytest.raises(ChybaModelu) as e:
-        volej_json(m)
-    assert e.value.druh == "nenainstalovano"
+    with pytest.raises(ModelError) as e:
+        call_json(m)
+    assert e.value.kind == 'not_installed'
 
 
-def test_prikaz_z_nastaveni(tmp_path):
+def test_command_from_settings(tmp_path):
     program = tmp_path / "muj-claude.exe"
     program.write_text("")
-    n = nastaveni()
+    n = settings()
     n = n.model_copy(update={"predplatne": n.predplatne.model_copy(
         update={"claude": n.predplatne.claude.model_copy(update={"prikaz": str(program)})})})
-    s = FalesnySpoustec(ok())
-    ClaudeCliModel(n, spust=s).json("I", "Z", VystupNalezitosti, krok="k")
-    assert s.volani[0].argv[0] == str(program) and s.auth_volani[0].argv[0] == str(program)
+    s = FakeRunner(ok())
+    ClaudeCliModel(n, run=s).json("I", "Z", RequirementsOutput, step="k")
+    assert s.calls[0].argv[0] == str(program) and s.auth_calls[0].argv[0] == str(program)
 
 
-def test_prihlaseni_api_klicem_odmitne():
-    auth = Vysledek(0, json.dumps({"loggedIn": True, "authMethod": "api_key"}), "")
-    with pytest.raises(ChybaModelu) as e:
+def test_api_key_login_is_rejected():
+    auth = ProcessResult(0, json.dumps({"loggedIn": True, "authMethod": "api_key"}), "")
+    with pytest.raises(ModelError) as e:
         model(auth=auth)
-    assert e.value.druh == "neprihlasen" and "api_key" in e.value.detail
+    assert e.value.kind == 'not_authenticated' and "api_key" in e.value.detail
 
 
 @pytest.mark.parametrize("auth", [
-    Vysledek(0, json.dumps({"loggedIn": False}), ""),
-    Vysledek(1, "Not logged in", ""),
-    Vysledek(0, "[]", ""),
+    ProcessResult(0, json.dumps({"loggedIn": False}), ""),
+    ProcessResult(1, "Not logged in", ""),
+    ProcessResult(0, "[]", ""),
 ])
-def test_nepřihlášený_nebo_necitelny_stav(auth):
-    with pytest.raises(ChybaModelu) as e:
+def test_unauthenticated_or_unreadable_status(auth):
+    with pytest.raises(ModelError) as e:
         model(auth=auth)
-    assert e.value.druh == "neprihlasen"
+    assert e.value.kind == 'not_authenticated'
 
 
-def test_kontrola_prihlaseni_bezi_v_prazdnem_adresari_s_limitem():
+def test_login_check_uses_empty_directory_and_timeout():
     m, s = model()
-    a = s.auth_volani[0]
+    a = s.auth_calls[0]
     assert a.timeout == 60 and a.argv[1:] == ["auth", "status"]
 
 
-def test_cesta_s_mezerou_a_apostrofem(monkeypatch, tmp_path):
-    slozka = tmp_path / "O'Brien Novák"
-    slozka.mkdir()
-    monkeypatch.setattr(tempfile, "tempdir", str(slozka))
+def test_path_with_space_and_apostrophe(monkeypatch, tmp_path):
+    directory = tmp_path / "O'Brien Novák"
+    directory.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(directory))
     m, s = model(ok())
-    volej_json(m)
-    v = s.volani[0]
-    assert v.soubory["instrukce.md"] == "INSTRUKCE"
+    call_json(m)
+    v = s.calls[0]
+    assert v.files['instructions.md'] == "INSTRUKCE"
     assert "O'Brien Novák" in v.argv[v.argv.index("--system-prompt-file") + 1]
 
 
-def test_debug_log_neobsahuje_instrukce(caplog):
+def test_debug_log_omits_instructions(caplog):
     m, _ = model(ok())
-    with caplog.at_level(logging.DEBUG, logger="refiner.modely.claude_cli"):
-        volej_json(m)
+    with caplog.at_level(logging.DEBUG, logger="refiner.models.claude_cli"):
+        call_json(m)
     assert "INSTRUKCE" not in caplog.text and "ZADANI-123" not in caplog.text

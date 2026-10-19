@@ -19,8 +19,8 @@ from refiner.data import (
     sestav_kriteria,
 )
 from refiner.konfigurace import ChybaKonfigurace, Konfigurace
-from refiner.modely.chyby import ChybaModelu, Sluzba
-from refiner.modely.rozhrani import Model
+from refiner.models.errors import ModelError, Service
+from refiner.models.interface import Model
 
 T = TypeVar("T")
 
@@ -138,8 +138,8 @@ def _vycisti_dokument(text: str) -> str:
 
 # ---------------------------------------------------------------- volání s jednou opravou
 
-def _sluzba(model: Model) -> Sluzba:
-    return "OpenAI" if model.nazev.lower().startswith("gpt") else "Anthropic"
+def _sluzba(model: Model) -> Service:
+    return "OpenAI" if model.name.lower().startswith("gpt") else "Anthropic"
 
 
 def s_opravou(
@@ -156,17 +156,17 @@ def s_opravou(
         z = zadani if pokus == 0 else f"{zadani}\n\n## Oprava\nPředchozí odpověď byla neplatná: {'; '.join(chyby)}"
         try:
             vysledek = zavolej(z)
-        except ChybaModelu as e:
-            if e.druh != "nevalidni_vystup":
+        except ModelError as e:
+            if e.kind != 'invalid_output':
                 raise
-            chyby = [e.detail or e.hlaska]
-            surova = e.surova_odpoved
+            chyby = [e.detail or e.message]
+            surova = e.raw_response
             continue
         chyby = zkontroluj(vysledek)
         if not chyby:
             return vysledek
         surova = surove(vysledek)
-    raise ChybaModelu("nevalidni_vystup", _sluzba(model), detail="; ".join(chyby), surova_odpoved=surova)
+    raise ModelError('invalid_output', _sluzba(model), detail="; ".join(chyby), raw_response=surova)
 
 
 # ---------------------------------------------------------------- kontroly
@@ -294,7 +294,7 @@ def extrahuj_nalezitosti(model: Model, zdroje: Zdroje) -> tuple[list[Nalezitost]
     vystup = s_opravou(
         model,
         ZADANI_NALEZITOSTI,
-        lambda z: model.json(instrukce, z, VystupNalezitosti, krok="nalezitosti", effort=effort),
+        lambda z: model.json(instrukce, z, VystupNalezitosti, step="nalezitosti", effort=effort),
         lambda v: _zkontroluj_nalezitosti(v, zdroje.poptavka),
         lambda v: v.model_dump_json(indent=2),
     )
@@ -314,7 +314,7 @@ def napis_navrh(model: Model, zdroje: Zdroje, nalezitosti: list[Nalezitost]) -> 
     return s_opravou(
         model,
         ZADANI_NAVRH,
-        lambda z: _vycisti_dokument(model.text(instrukce, z, krok="navrh_1")),
+        lambda z: _vycisti_dokument(model.text(instrukce, z, step="navrh_1")),
         lambda t: [] if t.strip() else ["Dokument je prázdný."],
         lambda t: t,
     )
@@ -341,7 +341,7 @@ def ohodnot(
     h = s_opravou(
         model,
         sekce_dokument(dokument),
-        lambda z: model.json(instrukce, z, Hodnoceni, krok=krok),
+        lambda z: model.json(instrukce, z, Hodnoceni, step=krok),
         lambda v: zkontroluj_hodnoceni(v, kriteria),
         lambda v: v.model_dump_json(indent=2),
     )
@@ -372,7 +372,7 @@ def posud(
     return s_opravou(
         model,
         zadani,
-        lambda z: model.json(instrukce, z, Posouzeni, krok=krok),
+        lambda z: model.json(instrukce, z, Posouzeni, step=krok),
         lambda v: zkontroluj_posouzeni(v, hodnoceni),
         lambda v: v.model_dump_json(indent=2),
     )
@@ -397,7 +397,7 @@ def zapracuj(
     return s_opravou(
         model,
         zadani,
-        lambda z: _vycisti_dokument(model.text(instrukce, z, krok=krok)),
+        lambda z: _vycisti_dokument(model.text(instrukce, z, step=krok)),
         lambda t: zkontroluj_prepis(dokument, t, hodnoceni, posouzeni),
         lambda t: t,
     )

@@ -8,15 +8,15 @@ from jinja2 import Environment, FileSystemLoader
 
 from refiner.beh import Beh
 from refiner.data import Hodnoceni, Posouzeni, Spotreba, VystupNalezitosti, sestav_kriteria
-from refiner.fakta import najdi_placeholdery, podezrele_udaje
+from refiner.facts import find_placeholders, find_suspicious_facts
 from refiner.konfigurace import Konfigurace
 from refiner.skore import format_skore
 
 _SABLONY = Path(__file__).parent / "sablony"
 
 _DRUHY = {
-    "castka": "Částky", "ico": "IČO", "email": "E-maily", "telefon": "Telefony",
-    "jmeno": "Jména", "url": "Odkazy",
+    "amount": "Částky", "company_id": "IČO", "email": "E-maily", "phone": "Telefony",
+    "name": "Jména", "url": "Odkazy",
 }
 _NAZVY_KROKU = {"poptavka": "Poptávka", "nalezitosti": "Náležitosti z poptávky"}
 
@@ -222,14 +222,14 @@ def vytvor_prehled(beh: Beh, konfigurace: Konfigurace) -> Path:
         klic = f"navrh_{finalni}"
         if beh.hotovo(klic) and (beh.slozka / beh.stav.kroky[klic].soubor).exists():
             dokument = beh.text(klic)
-            placeholdery = najdi_placeholdery(dokument)
+            placeholdery = find_placeholders(dokument)
             zdroje = beh.text("poptavka") if beh.hotovo("poptavka") else ""
             podklady = beh.slozka / "data" / "podklady.md"
             if podklady.exists():
                 zdroje += "\n" + podklady.read_text(encoding="utf-8")
             skupiny: dict[str, list[str]] = {}
-            for u in podezrele_udaje(dokument, zdroje):
-                skupiny.setdefault(u.druh, []).append(u.hodnota)
+            for u in find_suspicious_facts(dokument, zdroje):
+                skupiny.setdefault(u.kind, []).append(u.value)
             podezrele = [{"druh": _DRUHY[d], "hodnoty": v} for d, v in skupiny.items()]
         if finalni in hodnoceni:
             tvrzeni = hodnoceni[finalni].tvrzeni_k_overeni

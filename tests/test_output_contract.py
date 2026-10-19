@@ -11,8 +11,8 @@ import shutil
 from refiner.aplikace import dokonci, obnov_beh, otevri_dokonceny, zahaj_beh
 from refiner.beh import Beh
 from refiner.data import Hodnoceni, Posouzeni, VystupNalezitosti
-from refiner.modely.chyby import ChybaModelu
-from refiner.modely.falesne import FalesnyModel
+from refiner.models.errors import ModelError
+from refiner.models.fakes import FakeModel
 from refiner.porovnani import (
     Pokryti, PokrytiPrvku, PrvekReference, SeznamPrvku,
     Srovnani, SrovnaniKriteria, porovnej,
@@ -43,18 +43,18 @@ def _app_root(tmp_path: Path, repo_root: Path) -> Path:
     return root
 
 
-def _models(interrupted: bool = False) -> tuple[FalesnyModel, FalesnyModel]:
+def _models(interrupted: bool = False) -> tuple[FakeModel, FakeModel]:
     writer, evaluator = odpovedi_skriptu([8.0, 9.5] if interrupted else [9.5])
     for step in ("navrh_1", "navrh_2"):
         writer[step][0] += "\n\nCena: [DOPLNIT: cena – sazba není v podkladech]\n"
     if interrupted:
-        evaluator["hodnoceni_2"] = [ChybaModelu("sit", "OpenAI")]
-    return FalesnyModel(writer, nazev="claude-falesny"), FalesnyModel(evaluator, nazev="gpt-falesny")
+        evaluator["hodnoceni_2"] = [ModelError('network', "OpenAI")]
+    return FakeModel(writer, name="claude-falesny"), FakeModel(evaluator, name="gpt-falesny")
 
 
-def _comparison_model() -> FalesnyModel:
+def _comparison_model() -> FakeModel:
     ids = [criterion.id for criterion in kriteria_test()]
-    return FalesnyModel({
+    return FakeModel({
         "porovnani_kalibrace": [hodnoceni(9.0, navrhy=0)],
         "porovnani_srovnani_1": [Srovnani(kriteria=[
             SrovnaniKriteria(id=id_, lepsi="A", zduvodneni="Zdůvodnění.") for id_ in ids])],
@@ -62,7 +62,7 @@ def _comparison_model() -> FalesnyModel:
             SrovnaniKriteria(id=id_, lepsi="B", zduvodneni="Zdůvodnění.") for id_ in ids])],
         "porovnani_prvky": [SeznamPrvku(prvky=[PrvekReference(id="P1", popis="Metodika cvičení")])],
         "porovnani_pokryti": [Pokryti(polozky=[PokrytiPrvku(id="P1", stav="je", komentar="Kap. 1.")])],
-    }, nazev="gpt-falesny")
+    }, name="gpt-falesny")
 
 
 def test_existing_output_paths_and_czech_content(tmp_path, koren_repa):

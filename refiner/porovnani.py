@@ -32,9 +32,9 @@ from refiner.kroky import (
     text_kriterii,
     vykresli_prompt,
 )
-from refiner.modely.rozhrani import Model
+from refiner.models.interface import Model
 from refiner.skore import format_skore, spocitej
-from refiner.vstup import PODPOROVANE_PRIPONY, ChybaVstupu, nacti_jako_markdown, najdi_vstupy
+from refiner.input import SUPPORTED_EXTENSIONS, InputError, read_as_markdown, find_inputs
 
 _SABLONY = Path(__file__).parent / "vystup" / "sablony"
 
@@ -114,10 +114,10 @@ def zkombinuj_srovnani(s1: Srovnani, s2: Srovnani) -> dict[str, Verdikt]:
 def najdi_referenci(koren: Path) -> Path:
     """Jediný podporovaný soubor (DOCX, MD, TXT) v koren/examples/."""
     slozka = Path(koren) / "examples"
-    soubory = najdi_vstupy(slozka) if slozka.is_dir() else []
+    soubory = find_inputs(slozka) if slozka.is_dir() else []
     if len(soubory) == 1:
         return soubory[0]
-    raise ChybaVstupu(
+    raise InputError(
         f"Ve složce examples/ má být právě jedna referenční nabídka (DOCX, MD nebo TXT), "
         f"nalezeno: {len(soubory)}. Jinak použijte --reference SOUBOR."
     )
@@ -126,10 +126,10 @@ def najdi_referenci(koren: Path) -> Path:
 def nacti_referenci(cesta: Path) -> str:
     cesta = Path(cesta)
     if not cesta.is_file():
-        raise ChybaVstupu(f"Referenční soubor {cesta} neexistuje.")
-    if cesta.suffix.lower() not in PODPOROVANE_PRIPONY:
-        raise ChybaVstupu(f"Referenční soubor {cesta.name} musí být DOCX, MD nebo TXT.")
-    return nacti_jako_markdown(cesta)
+        raise InputError(f"Referenční soubor {cesta} neexistuje.")
+    if cesta.suffix.lower() not in SUPPORTED_EXTENSIONS:
+        raise InputError(f"Referenční soubor {cesta.name} musí být DOCX, MD nebo TXT.")
+    return read_as_markdown(cesta)
 
 
 # ---------------------------------------------------------------- kontroly odpovědí
@@ -288,9 +288,9 @@ def porovnej(
     """
     finalni = beh.stav.finalni_verze
     if beh.stav.stav != "dokoncen" or finalni is None:
-        raise ChybaVstupu(f"Běh {beh.slozka.name} není dokončený; porovnat lze jen dokončený běh.")
+        raise InputError(f"Běh {beh.slozka.name} není dokončený; porovnat lze jen dokončený běh.")
     if str(finalni) not in beh.stav.skore or not beh.hotovo(f"navrh_{finalni}"):
-        raise ChybaVstupu(f"Běh {beh.slozka.name} nemá uloženou finální verzi {finalni} nebo její skóre.")
+        raise InputError(f"Běh {beh.slozka.name} nemá uloženou finální verzi {finalni} nebo její skóre.")
 
     konf = zdroje.konfigurace
     nalezitosti = beh.data("nalezitosti", VystupNalezitosti).nalezitosti
@@ -308,7 +308,7 @@ def porovnej(
         """Validované volání hodnotitele: nejvýš 2 pokusy, druhý s popisem chyb (jako v kroky.py)."""
         return s_opravou(
             hodnotitel, zadani,
-            lambda z: hodnotitel.json(instr, z, schema, krok=krok),
+            lambda z: hodnotitel.json(instr, z, schema, step=krok),
             zkontroluj,
             lambda x: x.model_dump_json(indent=2),
         )
@@ -345,7 +345,7 @@ def porovnej(
         ).polozky
         hlaseni("hotovo")
     finally:
-        spotreba = hodnotitel.vyzvedni_spotrebu()
+        spotreba = hodnotitel.take_usage()
         if spotreba:
             beh.pridej_spotrebu(spotreba)
 

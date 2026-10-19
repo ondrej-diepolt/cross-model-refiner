@@ -1,8 +1,8 @@
 import pytest
 
 from refiner.beh import Beh
-from refiner.modely.chyby import ChybaModelu
-from refiner.modely.falesne import FalesnyModel
+from refiner.models.errors import ModelError
+from refiner.models.fakes import FakeModel
 from refiner.smycka import spust_smycku
 from tests.pomocne import (
     beh_test,
@@ -14,8 +14,8 @@ from tests.pomocne import (
 )
 
 
-def _kroky(model: FalesnyModel) -> list[str]:
-    return [k for k, *_ in model.volani]
+def _kroky(model: FakeModel) -> list[str]:
+    return [k for k, *_ in model.calls]
 
 
 def _ticho(_: str) -> None:
@@ -80,8 +80,8 @@ def test_splneny_cil_ma_prednost_pred_vyssim_zablokovanym_skore(tmp_path, zdroje
     hod["hodnoceni_2"] = [h2]
     pis["posouzeni_2"] = [posouzeni(h2)]
     hod["hodnoceni_3"] = [hodnoceni(9.5, {"B1": 9.0})]
-    v = spust_smycku(beh, zdroje, FalesnyModel(pis, nazev="claude-falesny"),
-                     FalesnyModel(hod, nazev="gpt-falesny"), hlaseni=_ticho)
+    v = spust_smycku(beh, zdroje, FakeModel(pis, name="claude-falesny"),
+                     FakeModel(hod, name="gpt-falesny"), hlaseni=_ticho)
     assert not v.skore[2].cil_splnen and v.skore[3].cil_splnen
     assert v.skore[2].celkem > v.skore[3].celkem
     assert v.duvod == "cil_splnen" and v.finalni_verze == 3
@@ -106,10 +106,10 @@ def _odpovedi_se_smisenym_posouzenim(skore: list[float]):
 def test_odmitnute_navrhy_jdou_do_dalsiho_hodnoceni(tmp_path, zdroje):
     beh = beh_test(tmp_path, zdroje)
     pis_o, hod_o = _odpovedi_se_smisenym_posouzenim([7.0, 9.5])
-    pis, hod = FalesnyModel(pis_o), FalesnyModel(hod_o, nazev="gpt-falesny")
+    pis, hod = FakeModel(pis_o), FakeModel(hod_o, name="gpt-falesny")
     v = spust_smycku(beh, zdroje, pis, hod, hlaseni=_ticho)
     assert v.duvod == "cil_splnen"
-    instrukce = {k: i for k, i, _ in hod.volani}
+    instrukce = {k: i for k, i, _ in hod.calls}
     assert "ODMITNUTO-XYZ" in instrukce["hodnoceni_2"]
     assert "Reference není ve zdrojích." in instrukce["hodnoceni_2"]
     assert "Doplnit tabulku rizik." not in instrukce["hodnoceni_2"]   # částečně přijatý není odmítnutý
@@ -119,15 +119,15 @@ def test_odmitnute_navrhy_jdou_do_dalsiho_hodnoceni(tmp_path, zdroje):
 def test_obnoveni_nevola_hotove_kroky(tmp_path, zdroje):
     beh = beh_test(tmp_path, zdroje)
     pis_o, hod_o = odpovedi_skriptu([7.0, 8.0, 9.5])
-    hod_o["hodnoceni_2"] = [ChybaModelu("pretizeni", "OpenAI")]
-    with pytest.raises(ChybaModelu):
-        spust_smycku(beh, zdroje, FalesnyModel(pis_o), FalesnyModel(hod_o, nazev="gpt-falesny"),
+    hod_o["hodnoceni_2"] = [ModelError('overloaded', "OpenAI")]
+    with pytest.raises(ModelError):
+        spust_smycku(beh, zdroje, FakeModel(pis_o), FakeModel(hod_o, name="gpt-falesny"),
                      hlaseni=_ticho)
 
     beh2 = Beh.otevri(beh.slozka)
     h2 = hodnoceni(8.0)
-    hod2 = FalesnyModel({"hodnoceni_2": [h2], "hodnoceni_3": [hodnoceni(9.5)]}, nazev="gpt-falesny")
-    pis2 = FalesnyModel({"posouzeni_2": [posouzeni(h2)], "navrh_3": [text_navrhu(3)]})
+    hod2 = FakeModel({"hodnoceni_2": [h2], "hodnoceni_3": [hodnoceni(9.5)]}, name="gpt-falesny")
+    pis2 = FakeModel({"posouzeni_2": [posouzeni(h2)], "navrh_3": [text_navrhu(3)]})
     v = spust_smycku(beh2, zdroje, pis2, hod2, hlaseni=_ticho)
 
     assert v.duvod == "cil_splnen" and v.finalni_verze == 3 and set(v.skore) == {1, 2, 3}
@@ -143,24 +143,24 @@ def test_obnoveni_nevola_hotove_kroky(tmp_path, zdroje):
 def test_obnoveni_zachova_odmitnute_navrhy(tmp_path, zdroje):
     beh = beh_test(tmp_path, zdroje)
     pis_o, hod_o = _odpovedi_se_smisenym_posouzenim([7.0, 9.5])
-    hod_o["hodnoceni_2"] = [ChybaModelu("pretizeni", "OpenAI")]
-    with pytest.raises(ChybaModelu):
-        spust_smycku(beh, zdroje, FalesnyModel(pis_o), FalesnyModel(hod_o, nazev="gpt-falesny"),
+    hod_o["hodnoceni_2"] = [ModelError('overloaded', "OpenAI")]
+    with pytest.raises(ModelError):
+        spust_smycku(beh, zdroje, FakeModel(pis_o), FakeModel(hod_o, name="gpt-falesny"),
                      hlaseni=_ticho)
 
-    hod2 = FalesnyModel({"hodnoceni_2": [hodnoceni(9.5)]}, nazev="gpt-falesny")
-    v = spust_smycku(Beh.otevri(beh.slozka), zdroje, FalesnyModel({}), hod2, hlaseni=_ticho)
+    hod2 = FakeModel({"hodnoceni_2": [hodnoceni(9.5)]}, name="gpt-falesny")
+    v = spust_smycku(Beh.otevri(beh.slozka), zdroje, FakeModel({}), hod2, hlaseni=_ticho)
     assert v.duvod == "cil_splnen"
-    instrukce = {k: i for k, i, _ in hod2.volani}
+    instrukce = {k: i for k, i, _ in hod2.calls}
     assert "ODMITNUTO-XYZ" in instrukce["hodnoceni_2"]
 
 
 def test_spotreba_ulozena_po_kazdem_kroku(tmp_path, zdroje):
     beh = beh_test(tmp_path, zdroje)
     pis_o, hod_o = odpovedi_skriptu([7.0, 9.5])
-    hod_o["hodnoceni_2"] = [ChybaModelu("pretizeni", "OpenAI")]
-    with pytest.raises(ChybaModelu):
-        spust_smycku(beh, zdroje, FalesnyModel(pis_o), FalesnyModel(hod_o, nazev="gpt-falesny"),
+    hod_o["hodnoceni_2"] = [ModelError('overloaded', "OpenAI")]
+    with pytest.raises(ModelError):
+        spust_smycku(beh, zdroje, FakeModel(pis_o), FakeModel(hod_o, name="gpt-falesny"),
                      hlaseni=_ticho)
     # Úspěšně proběhlo 5 volání: nalezitosti, navrh_1, hodnoceni_1, posouzeni_1, navrh_2
     # (zadání uvádí 4 – navrh_2 v tom součtu chybí; hodnoceni_2 spadlo, takže spotřebu nemá).

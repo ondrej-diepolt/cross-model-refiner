@@ -7,91 +7,91 @@ from types import SimpleNamespace
 import pytest
 from openai.lib._pydantic import to_strict_json_schema
 
-from refiner.data import Hodnoceni, Posouzeni, Spotreba, VystupNalezitosti
-from refiner.konfigurace import nacti_nastaveni
-from refiner.kroky import s_opravou
-from refiner.modely.chyby import ChybaModelu
-from refiner.modely.codex_cli import CodexModel, druh_chyby_codex, precti_udalosti
-from refiner.modely.podproces import VyprselCas, Vysledek
-from refiner.porovnani import Pokryti, SeznamPrvku, Srovnani
+from refiner.data import Hodnoceni as Evaluation, Posouzeni as SuggestionReview, Spotreba as TokenUsage, VystupNalezitosti as RequirementsOutput
+from refiner.konfigurace import nacti_nastaveni as load_settings
+from refiner.kroky import s_opravou as with_repair
+from refiner.models.errors import ModelError
+from refiner.models.codex_cli import CodexModel, codex_error_kind, read_events
+from refiner.models.subprocess import ProcessTimeout, ProcessResult
+from refiner.porovnani import Pokryti as Coverage, SeznamPrvku as ReferenceElements, Srovnani as PairComparison
 
-KOREN = Path(__file__).parent.parent
+ROOT = Path(__file__).parent.parent
 
-NALEZITOSTI = {"nalezitosti": [{"id": "N1", "text": "Metodika", "citace": "popis metodiky"}]}
+REQUIREMENTS = {"nalezitosti": [{"id": "N1", "text": "Metodika", "citace": "popis metodiky"}]}
 USAGE = {"input_tokens": 2000, "cached_input_tokens": 500, "output_tokens": 300,
          "reasoning_output_tokens": 100}
-LOGIN_OK = Vysledek(0, "", "Logged in using ChatGPT\n")
+LOGIN_OK = ProcessResult(0, "", "Logged in using ChatGPT\n")
 
 
-def udalosti(*polozky) -> str:
-    return "\n".join(p if isinstance(p, str) else json.dumps(p) for p in polozky) + "\n"
+def events(*items) -> str:
+    return "\n".join(p if isinstance(p, str) else json.dumps(p) for p in items) + "\n"
 
 
-def uspech(usage=USAGE) -> str:
-    return udalosti({"type": "thread.started", "thread_id": "t"},
+def success(usage=USAGE) -> str:
+    return events({"type": "thread.started", "thread_id": "t"},
                     {"type": "item.completed", "item": {"type": "agent_message", "text": "hotovo"}},
                     {"type": "turn.completed", "usage": usage})
 
 
-def ok_vysledek(stdout=None) -> Vysledek:
-    return Vysledek(0, uspech() if stdout is None else stdout, "")
+def ok_result(stdout=None) -> ProcessResult:
+    return ProcessResult(0, success() if stdout is None else stdout, "")
 
 
-def nastaveni():
-    return nacti_nastaveni(KOREN / "nastaveni.yaml").modely
+def settings():
+    return load_settings(ROOT / "nastaveni.yaml").modely
 
 
-class FalesnySpoustec:
-    """`login status` vrací LOGIN_OK; jinak bere z fronty dvojici (Vysledek, obsah souboru -o)."""
+class FakeRunner:
+    """login status returns LOGIN_OK; other calls consume (ProcessResult, output-file content) pairs."""
 
-    def __init__(self, *odpovedi, login=LOGIN_OK):
-        self.fronta = list(odpovedi)
+    def __init__(self, *responses, login=LOGIN_OK):
+        self.queue = list(responses)
         self.login = login
-        self.volani = []
-        self.login_volani = []
+        self.calls = []
+        self.login_calls = []
 
     def __call__(self, argv, stdin, env, cwd, timeout):
         if argv[1:3] == ["login", "status"]:
-            self.login_volani.append(SimpleNamespace(argv=argv, env=env, cwd=cwd, timeout=timeout))
+            self.login_calls.append(SimpleNamespace(argv=argv, env=env, cwd=cwd, timeout=timeout))
             return self.login
-        soubory = {}
-        vystup = Path(argv[argv.index("-o") + 1])
-        for p in vystup.parent.iterdir():
-            soubory[p.name] = p.read_text(encoding="utf-8")
-        self.volani.append(SimpleNamespace(
-            argv=argv, stdin=stdin, env=env, cwd=Path(cwd), timeout=timeout, soubory=soubory,
-            prace_obsah=list(Path(cwd).iterdir())))
-        odpoved = self.fronta.pop(0)
-        if isinstance(odpoved, Exception):
-            raise odpoved
-        vysledek, obsah = odpoved if isinstance(odpoved, tuple) else (odpoved, None)
-        if obsah is not None:
-            vystup.write_text(obsah, encoding="utf-8")
-        return vysledek
+        files = {}
+        output = Path(argv[argv.index("-o") + 1])
+        for p in output.parent.iterdir():
+            files[p.name] = p.read_text(encoding="utf-8")
+        self.calls.append(SimpleNamespace(
+            argv=argv, stdin=stdin, env=env, cwd=Path(cwd), timeout=timeout, files=files,
+            work_contents=list(Path(cwd).iterdir())))
+        response = self.queue.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        result, content = response if isinstance(response, tuple) else (response, None)
+        if content is not None:
+            output.write_text(content, encoding="utf-8")
+        return result
 
 
 @pytest.fixture(autouse=True)
-def _codex_v_path(monkeypatch):
+def _codex_in_path(monkeypatch):
     monkeypatch.setattr("shutil.which", lambda n: "C:/fake/codex.exe" if n == "codex" else None)
 
 
-def model(*odpovedi, **kw):
-    spoustec = FalesnySpoustec(*odpovedi, **kw)
-    return CodexModel(nastaveni(), spust=spoustec), spoustec
+def model(*responses, **kw):
+    runner = FakeRunner(*responses, **kw)
+    return CodexModel(settings(), run=runner), runner
 
 
-def odp_json(obsah=NALEZITOSTI, stdout=None):
-    return (ok_vysledek(stdout), json.dumps(obsah))
+def json_response(content=REQUIREMENTS, stdout=None):
+    return (ok_result(stdout), json.dumps(content))
 
 
-def volej_json(m, krok="hodnoceni_1"):
-    return m.json("INSTRUKCE", "ZADANI-123", VystupNalezitosti, krok=krok)
+def call_json(m, step="hodnoceni_1"):
+    return m.json("INSTRUKCE", "ZADANI-123", RequirementsOutput, step=step)
 
 
-def test_argv_izolace_a_stdin():
-    m, s = model(odp_json())
-    volej_json(m)
-    v = s.volani[0]
+def test_argv_isolation_and_stdin():
+    m, s = model(json_response())
+    call_json(m)
+    v = s.calls[0]
     argv = v.argv
     for p in ["exec", "--json", "--ephemeral", "--skip-git-repo-check", "--ignore-user-config",
               "--ignore-rules", "-"]:
@@ -109,230 +109,230 @@ def test_argv_izolace_a_stdin():
     assert not any("INSTRUKCE" in a for a in argv)
 
 
-def test_instrukce_v_souboru_a_toml_cesta(monkeypatch, tmp_path):
+def test_instructions_in_file_and_toml_path(monkeypatch, tmp_path):
     tomllib = pytest.importorskip("tomllib")
-    slozka = tmp_path / "O'Brien Novák"
-    slozka.mkdir()
-    monkeypatch.setattr(tempfile, "tempdir", str(slozka))
-    m, s = model(odp_json())
-    volej_json(m)
-    argv = s.volani[0].argv
-    hodnota = next(a for a in argv if a.startswith("model_instructions_file="))
-    cesta = tomllib.loads(hodnota)["model_instructions_file"]
-    assert "O'Brien Novák" in cesta
-    assert s.volani[0].soubory["instrukce.md"] == "INSTRUKCE"
-    assert Path(cesta).name == "instrukce.md"
+    directory = tmp_path / "O'Brien Novák"
+    directory.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(directory))
+    m, s = model(json_response())
+    call_json(m)
+    argv = s.calls[0].argv
+    value = next(a for a in argv if a.startswith("model_instructions_file="))
+    path = tomllib.loads(value)["model_instructions_file"]
+    assert "O'Brien Novák" in path
+    assert s.calls[0].files['instructions.md'] == "INSTRUKCE"
+    assert Path(path).name == 'instructions.md'
 
 
-def test_schema_je_striktni():
-    m, s = model(odp_json())
-    volej_json(m)
-    argv = s.volani[0].argv
+def test_schema_is_strict():
+    m, s = model(json_response())
+    call_json(m)
+    argv = s.calls[0].argv
     assert "--output-schema" in argv
-    sch = json.loads(s.volani[0].soubory["schema.json"])
+    sch = json.loads(s.calls[0].files["schema.json"])
     assert sch["additionalProperties"] is False and set(sch["required"]) == set(sch["properties"])
     assert Path(argv[argv.index("--output-schema") + 1]).name == "schema.json"
 
 
-def test_text_bez_schematu():
-    m, s = model((ok_vysledek(), "Ahoj světe"))
-    assert m.text("I", "Z", krok="navrh") == "Ahoj světe"
-    assert "--output-schema" not in s.volani[0].argv
+def test_text_without_schema():
+    m, s = model((ok_result(), "Ahoj světe"))
+    assert m.text("I", "Z", step="navrh") == "Ahoj světe"
+    assert "--output-schema" not in s.calls[0].argv
 
 
-def test_effort_z_konfigurace_parametr_se_ignoruje():
-    m, s = model(odp_json())
-    m.json("I", "Z", VystupNalezitosti, krok="k", effort="low")
-    assert "model_reasoning_effort=high" in s.volani[0].argv
+def test_effort_from_configuration_ignores_parameter():
+    m, s = model(json_response())
+    m.json("I", "Z", RequirementsOutput, step="k", effort="low")
+    assert "model_reasoning_effort=high" in s.calls[0].argv
 
 
-def test_strict_schema_pro_vsechna_schemata_projektu():
-    for c in (VystupNalezitosti, Hodnoceni, Posouzeni, Srovnani, SeznamPrvku, Pokryti):
+def test_strict_schema_for_all_project_schemas():
+    for c in (RequirementsOutput, Evaluation, SuggestionReview, PairComparison, ReferenceElements, Coverage):
         to_strict_json_schema(c)
 
 
-def test_env_bez_klicu(monkeypatch):
+def test_environment_without_keys(monkeypatch):
     monkeypatch.setenv("CODEX_API_KEY", "x")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-y")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-z")
     monkeypatch.setenv("codex_access_token", "t")
     monkeypatch.setenv("CODEX_HOME", "C:/codex-home")
-    m, s = model(odp_json())
-    volej_json(m)
-    for env in (s.volani[0].env, s.login_volani[0].env):
+    m, s = model(json_response())
+    call_json(m)
+    for env in (s.calls[0].env, s.login_calls[0].env):
         assert not {"CODEX_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "CODEX_ACCESS_TOKEN"} \
             & {k.upper() for k in env}
         assert env["CODEX_HOME"] == "C:/codex-home"
 
 
-def test_cwd_prazdny_a_po_volani_smazany():
-    m, s = model(odp_json())
-    volej_json(m)
-    v = s.volani[0]
-    assert v.prace_obsah == [] and not v.cwd.exists()
-    assert v.timeout == nastaveni().timeout_s
+def test_cwd_empty_and_removed_after_call():
+    m, s = model(json_response())
+    call_json(m)
+    v = s.calls[0]
+    assert v.work_contents == [] and not v.cwd.exists()
+    assert v.timeout == settings().timeout_s
 
 
-def test_json_uspech_a_spotreba():
-    m, _ = model(odp_json())
-    assert volej_json(m) == VystupNalezitosti.model_validate(NALEZITOSTI)
-    assert m.vyzvedni_spotrebu() == [Spotreba(krok="hodnoceni_1", model="gpt-6-astra", vstup=2000, vystup=300,
+def test_json_success_and_usage():
+    m, _ = model(json_response())
+    assert call_json(m) == RequirementsOutput.model_validate(REQUIREMENTS)
+    assert m.take_usage() == [TokenUsage(krok="hodnoceni_1", model="gpt-6-astra", vstup=2000, vystup=300,
                                               cache_cteni=500, predplatne=True)]
-    assert m.vyzvedni_spotrebu() == []
+    assert m.take_usage() == []
 
 
-def test_ne_json_radky_na_stdout_se_preskoci():
-    stdout = udalosti("WARNING: něco se děje", "", {"type": "thread.started"}, "[1, 2]", "{rozbite",
+def test_non_json_stdout_lines_are_skipped():
+    stdout = events("WARNING: něco se děje", "", {"type": "thread.started"}, "[1, 2]", "{rozbite",
                       {"type": "turn.completed", "usage": USAGE})
-    m, _ = model(odp_json(stdout=stdout))
-    assert volej_json(m) == VystupNalezitosti.model_validate(NALEZITOSTI)
-    assert m.vyzvedni_spotrebu()[0].vstup == 2000
+    m, _ = model(json_response(stdout=stdout))
+    assert call_json(m) == RequirementsOutput.model_validate(REQUIREMENTS)
+    assert m.take_usage()[0].vstup == 2000
 
 
-def test_chybejici_vystupni_soubor_je_nevalidni():
-    m, _ = model(ok_vysledek())
-    with pytest.raises(ChybaModelu) as e:
-        volej_json(m)
-    assert e.value.druh == "nevalidni_vystup" and e.value.sluzba == "Codex"
+def test_missing_output_file_is_invalid():
+    m, _ = model(ok_result())
+    with pytest.raises(ModelError) as e:
+        call_json(m)
+    assert e.value.kind == 'invalid_output' and e.value.service == "Codex"
 
 
-def test_prazdny_vystupni_soubor_u_textu_je_jina():
-    m, _ = model((ok_vysledek(), "  \n"))
-    with pytest.raises(ChybaModelu) as e:
-        m.text("I", "Z", krok="navrh")
-    assert e.value.druh == "jina"
+def test_empty_text_output_file_is_other():
+    m, _ = model((ok_result(), "  \n"))
+    with pytest.raises(ModelError) as e:
+        m.text("I", "Z", step="navrh")
+    assert e.value.kind == 'other'
 
 
-def test_neplatny_json_vede_na_opravu():
-    m, s = model((ok_vysledek(), '{"nalezitosti": "ne seznam"}'), odp_json())
-    v = s_opravou(m, "ZADANI", lambda z: m.json("I", z, VystupNalezitosti, krok="k"), lambda _: [], lambda _: "")
-    assert v == VystupNalezitosti.model_validate(NALEZITOSTI) and len(s.volani) == 2
-    assert "## Oprava" in s.volani[1].stdin
+def test_invalid_json_triggers_repair():
+    m, s = model((ok_result(), '{"nalezitosti": "ne seznam"}'), json_response())
+    v = with_repair(m, "ZADANI", lambda z: m.json("I", z, RequirementsOutput, step="k"), lambda _: [], lambda _: "")
+    assert v == RequirementsOutput.model_validate(REQUIREMENTS) and len(s.calls) == 2
+    assert "## Oprava" in s.calls[1].stdin
 
 
-def test_uriznuty_json_je_uriznuto():
-    m, _ = model((ok_vysledek(), '{"nalezitosti": [{"id": "N1"'))
-    with pytest.raises(ChybaModelu) as e:
-        volej_json(m)
-    assert e.value.druh == "uriznuto"
+def test_truncated_json_is_truncated():
+    m, _ = model((ok_result(), '{"nalezitosti": [{"id": "N1"'))
+    with pytest.raises(ModelError) as e:
+        call_json(m)
+    assert e.value.kind == 'truncated'
 
 
-@pytest.mark.parametrize("text,druh", [
+@pytest.mark.parametrize('text,kind', [
     ("You’ve hit your usage limit. Visit https://chatgpt.com/settings/usage to purchase more credits",
-     "limit_predplatneho"),
-    ("usage_limit_reached", "limit_predplatneho"),
-    ("quota_exceeded", "limit_predplatneho"),
-    ("Not signed in. Please run 'codex login' to sign in with ChatGPT", "neprihlasen"),
-    ("The 'gpt-x' model is not supported when using Codex with a ChatGPT account.", "model_nedostupny"),
-    ("rate_limit_exceeded", "pretizeni"),
-    ("server_overloaded", "pretizeni"),
+     'subscription_limit'),
+    ("usage_limit_reached", 'subscription_limit'),
+    ("quota_exceeded", 'subscription_limit'),
+    ("Not signed in. Please run 'codex login' to sign in with ChatGPT", 'not_authenticated'),
+    ("The 'gpt-x' model is not supported when using Codex with a ChatGPT account.", 'model_unavailable'),
+    ("rate_limit_exceeded", 'overloaded'),
+    ("server_overloaded", 'overloaded'),
     ("něco jiného", None),
 ])
-def test_druh_chyby_codex(text, druh):
-    assert druh_chyby_codex(text) == druh
+def test_codex_error_kind(text, kind):
+    assert codex_error_kind(text) == kind
 
 
-def test_turn_failed_mapuje_chybu():
-    stdout = udalosti({"type": "thread.started"},
+def test_turn_failed_maps_error():
+    stdout = events({"type": "thread.started"},
                       {"type": "turn.failed", "error": {"message": "You’ve hit your usage limit. Try later."}})
-    m, _ = model(Vysledek(1, stdout, ""))
-    with pytest.raises(ChybaModelu) as e:
-        volej_json(m)
-    assert e.value.druh == "limit_predplatneho" and e.value.sluzba == "Codex"
-    assert "usage limit" in e.value.hlaska
+    m, _ = model(ProcessResult(1, stdout, ""))
+    with pytest.raises(ModelError) as e:
+        call_json(m)
+    assert e.value.kind == 'subscription_limit' and e.value.service == "Codex"
+    assert "usage limit" in e.value.message
 
 
-def test_model_nedostupny_jmenuje_model():
-    stdout = udalosti({"type": "error", "message": "The 'gpt-6-astra' model is not supported when using "
+def test_unavailable_model_names_model():
+    stdout = events({"type": "error", "message": "The 'gpt-6-astra' model is not supported when using "
                                                    "Codex with a ChatGPT account."})
-    m, _ = model(Vysledek(1, stdout, ""))
-    with pytest.raises(ChybaModelu) as e:
-        volej_json(m)
-    assert e.value.druh == "model_nedostupny" and "gpt-6-astra" in e.value.hlaska
+    m, _ = model(ProcessResult(1, stdout, ""))
+    with pytest.raises(ModelError) as e:
+        call_json(m)
+    assert e.value.kind == 'model_unavailable' and "gpt-6-astra" in e.value.message
 
 
-def test_chyba_ve_stderr_pri_nenulovem_kodu():
-    m, _ = model(Vysledek(1, "", "Not signed in. Please run 'codex login'"))
-    with pytest.raises(ChybaModelu) as e:
-        volej_json(m)
-    assert e.value.druh == "neprihlasen"
+def test_stderr_error_with_nonzero_returncode():
+    m, _ = model(ProcessResult(1, "", "Not signed in. Please run 'codex login'"))
+    with pytest.raises(ModelError) as e:
+        call_json(m)
+    assert e.value.kind == 'not_authenticated'
 
 
-def test_context_window_exceeded_je_jina_s_vysvetlenim():
-    stdout = udalosti({"type": "turn.failed", "error": {"message": "context_window_exceeded"}})
-    m, _ = model(Vysledek(1, stdout, ""))
-    with pytest.raises(ChybaModelu) as e:
-        volej_json(m)
-    assert e.value.druh == "jina" and "příliš dlouhé" in e.value.hlaska
+def test_context_window_exceeded_is_other_with_explanation():
+    stdout = events({"type": "turn.failed", "error": {"message": "context_window_exceeded"}})
+    m, _ = model(ProcessResult(1, stdout, ""))
+    with pytest.raises(ModelError) as e:
+        call_json(m)
+    assert e.value.kind == 'other' and "příliš dlouhé" in e.value.message
 
 
-def test_neznama_chyba_je_jina_bez_klicu():
-    m, _ = model(Vysledek(1, "", "boom sk-abc123"))
-    with pytest.raises(ChybaModelu) as e:
-        volej_json(m)
-    assert e.value.druh == "jina" and "sk-abc123" not in e.value.hlaska
+def test_unknown_error_is_other_without_keys():
+    m, _ = model(ProcessResult(1, "", "boom sk-abc123"))
+    with pytest.raises(ModelError) as e:
+        call_json(m)
+    assert e.value.kind == 'other' and "sk-abc123" not in e.value.message
 
 
-def test_chyba_se_spotrebou_zapise_spotrebu():
-    stdout = udalosti({"type": "turn.completed", "usage": USAGE},
+def test_error_with_usage_records_usage():
+    stdout = events({"type": "turn.completed", "usage": USAGE},
                       {"type": "turn.failed", "error": {"message": "server_overloaded"}})
-    m, _ = model(Vysledek(1, stdout, ""))
-    with pytest.raises(ChybaModelu):
-        volej_json(m)
-    assert len(m.vyzvedni_spotrebu()) == 1
+    m, _ = model(ProcessResult(1, stdout, ""))
+    with pytest.raises(ModelError):
+        call_json(m)
+    assert len(m.take_usage()) == 1
 
 
-def test_prechodna_chyba_v_proudu_neshodi_uspesny_beh():
-    stdout = udalosti({"type": "error", "message": "Reconnecting... 1/5"},
+def test_transient_stream_error_preserves_success():
+    stdout = events({"type": "error", "message": "Reconnecting... 1/5"},
                       {"type": "turn.completed", "usage": USAGE})
-    m, _ = model(odp_json(stdout=stdout))
-    assert volej_json(m) == VystupNalezitosti.model_validate(NALEZITOSTI)
+    m, _ = model(json_response(stdout=stdout))
+    assert call_json(m) == RequirementsOutput.model_validate(REQUIREMENTS)
 
 
-def test_pouziti_nastroje_jen_varuje(caplog):
-    stdout = udalosti({"type": "item.completed", "item": {"type": "command_execution", "command": "ls"}},
+def test_tool_use_only_warns(caplog):
+    stdout = events({"type": "item.completed", "item": {"type": "command_execution", "command": "ls"}},
                       {"type": "turn.completed", "usage": USAGE})
-    m, _ = model(odp_json(stdout=stdout))
-    with caplog.at_level(logging.WARNING, logger="refiner.modely.codex_cli"):
-        assert volej_json(m) == VystupNalezitosti.model_validate(NALEZITOSTI)
+    m, _ = model(json_response(stdout=stdout))
+    with caplog.at_level(logging.WARNING, logger="refiner.models.codex_cli"):
+        assert call_json(m) == RequirementsOutput.model_validate(REQUIREMENTS)
     assert "command_execution" in caplog.text
 
 
-def test_precti_udalosti():
-    stdout = udalosti({"type": "item.started", "item": {"type": "reasoning"}},
+def test_read_events():
+    stdout = events({"type": "item.started", "item": {"type": "reasoning"}},
                       {"type": "turn.completed", "usage": {"input_tokens": 1, "output_tokens": 2}},
                       {"type": "turn.completed", "usage": {"input_tokens": 10, "cached_input_tokens": 4,
                                                            "output_tokens": 20}},
                       {"type": "turn.failed", "error": {"message": "a"}},
                       {"type": "error", "message": "b"})
-    usage, zpravy, typy = precti_udalosti(stdout)
+    usage, messages, types = read_events(stdout)
     assert usage == {"input_tokens": 11, "cached_input_tokens": 4, "output_tokens": 22}
-    assert zpravy == ["a", "b"] and typy == {"reasoning"}
-    assert precti_udalosti("nic\n") == (None, [], set())
+    assert messages == ["a", "b"] and types == {"reasoning"}
+    assert read_events("nic\n") == (None, [], set())
 
 
 @pytest.mark.parametrize("login", [
-    Vysledek(0, "", "Logged in using an API key - sk-***"),
-    Vysledek(1, "", "Not logged in"),
-    Vysledek(0, "", ""),
+    ProcessResult(0, "", "Logged in using an API key - sk-***"),
+    ProcessResult(1, "", "Not logged in"),
+    ProcessResult(0, "", ""),
 ])
-def test_login_status_nepripusti_jine_prihlaseni(login):
-    with pytest.raises(ChybaModelu) as e:
+def test_login_status_rejects_other_authentication(login):
+    with pytest.raises(ModelError) as e:
         model(login=login)
-    assert e.value.druh == "neprihlasen" and e.value.sluzba == "Codex"
+    assert e.value.kind == 'not_authenticated' and e.value.service == "Codex"
 
 
-def test_login_status_api_klic_nesmi_unikout_do_detailu():
-    with pytest.raises(ChybaModelu) as e:
-        model(login=Vysledek(0, "", "Logged in using an API key - sk-abc123"))
-    assert "sk-abc123" not in e.value.detail and "sk-abc123" not in e.value.hlaska
+def test_login_status_redacts_api_key_in_detail():
+    with pytest.raises(ModelError) as e:
+        model(login=ProcessResult(0, "", "Logged in using an API key - sk-abc123"))
+    assert "sk-abc123" not in e.value.detail and "sk-abc123" not in e.value.message
 
 
-def test_login_status_uspech_na_stdout():
-    model(login=Vysledek(0, "Logged in using ChatGPT", ""))
+def test_login_status_success_on_stdout():
+    model(login=ProcessResult(0, "Logged in using ChatGPT", ""))
 
 
-def test_nativni_exe_misto_cmd(monkeypatch, tmp_path):
+def test_native_exe_instead_of_cmd(monkeypatch, tmp_path):
     exe = (tmp_path / "node_modules/@openai/codex/node_modules/@openai/codex-win32-x64"
            "/vendor/x86_64-pc-windows-msvc/bin/codex.exe")
     exe.parent.mkdir(parents=True)
@@ -340,47 +340,47 @@ def test_nativni_exe_misto_cmd(monkeypatch, tmp_path):
     cmd = tmp_path / "codex.cmd"
     cmd.write_text("")
     monkeypatch.setattr("shutil.which", lambda n: str(cmd) if n == "codex" else None)
-    m, s = model(odp_json())
-    volej_json(m)
-    assert s.volani[0].argv[0] == str(exe) and s.login_volani[0].argv[0] == str(exe)
+    m, s = model(json_response())
+    call_json(m)
+    assert s.calls[0].argv[0] == str(exe) and s.login_calls[0].argv[0] == str(exe)
 
 
 def test_timeout():
-    m, _ = model(VyprselCas())
-    with pytest.raises(ChybaModelu) as e:
-        volej_json(m)
-    assert e.value.druh == "timeout" and e.value.sluzba == "Codex"
+    m, _ = model(ProcessTimeout())
+    with pytest.raises(ModelError) as e:
+        call_json(m)
+    assert e.value.kind == 'timeout' and e.value.service == "Codex"
 
 
-def test_nenainstalovano(monkeypatch):
+def test_not_installed(monkeypatch):
     monkeypatch.setattr("shutil.which", lambda _: None)
-    with pytest.raises(ChybaModelu) as e:
-        CodexModel(nastaveni(), spust=FalesnySpoustec())
-    assert e.value.druh == "nenainstalovano" and "příkaz codex nebyl nalezen" in e.value.hlaska
+    with pytest.raises(ModelError) as e:
+        CodexModel(settings(), run=FakeRunner())
+    assert e.value.kind == 'not_installed' and "příkaz codex nebyl nalezen" in e.value.message
 
 
-def test_nenainstalovano_pri_spusteni():
+def test_not_installed_at_execution():
     m, _ = model(FileNotFoundError())
-    with pytest.raises(ChybaModelu) as e:
-        volej_json(m)
-    assert e.value.druh == "nenainstalovano"
+    with pytest.raises(ModelError) as e:
+        call_json(m)
+    assert e.value.kind == 'not_installed'
 
 
-def test_argv_bez_nastaveni_ktere_codex_nezna():
-    """Ostrý test (codex-cli 0.163.0): `tools.view_image` hlásí jako 'unrecognized configuration setting'."""
-    m, s = model(odp_json())
-    volej_json(m)
-    assert not any(a.startswith("tools.") for a in s.volani[0].argv)
+def test_argv_omits_unknown_codex_settings():
+    """An earlier live test with codex-cli 0.163.0 rejected tools.view_image as an unknown setting."""
+    m, s = model(json_response())
+    call_json(m)
+    assert not any(a.startswith("tools.") for a in s.calls[0].argv)
 
 
-def test_varovani_codexu_jako_item_error_neshodi_volani():
-    """Skutečný tvar výstupu z ostrého testu: varování o konfiguraci přijde jako item.completed typu error."""
-    varovani = {"type": "item.completed", "item": {
+def test_codex_item_error_warning_preserves_call():
+    """An earlier live capture reports configuration warnings as item.completed with type error."""
+    warning = {"type": "item.completed", "item": {
         "id": "item_0", "type": "error",
         "message": "Codex is ignoring 1 unrecognized configuration setting. Check for typos or deprecated settings."}}
-    stdout = udalosti({"type": "thread.started", "thread_id": "t"}, varovani, varovani, {"type": "turn.started"},
+    stdout = events({"type": "thread.started", "thread_id": "t"}, warning, warning, {"type": "turn.started"},
                       {"type": "item.completed", "item": {"id": "item_2", "type": "agent_message", "text": "{}"}},
                       {"type": "turn.completed", "usage": {**USAGE, "cache_write_input_tokens": 0}})
-    m, _ = model(odp_json(stdout=stdout))
-    assert volej_json(m) == VystupNalezitosti.model_validate(NALEZITOSTI)
-    assert m.vyzvedni_spotrebu()[0].vstup == 2000
+    m, _ = model(json_response(stdout=stdout))
+    assert call_json(m) == RequirementsOutput.model_validate(REQUIREMENTS)
+    assert m.take_usage()[0].vstup == 2000

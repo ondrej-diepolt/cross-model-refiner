@@ -14,8 +14,8 @@ from refiner.kroky import (
     zkontroluj_posouzeni,
     zkontroluj_prepis,
 )
-from refiner.modely.chyby import ChybaModelu
-from refiner.modely.falesne import FalesnyModel
+from refiner.models.errors import ModelError
+from refiner.models.fakes import FakeModel
 from tests.pomocne import hodnoceni, kriteria_test, posouzeni
 
 PROMENNE = {
@@ -68,16 +68,16 @@ def test_prompt_s_dolarem_se_vykresli(tmp_path):
 # ---------------------------------------------------------------- náležitosti
 
 def test_nalezitosti_zahodi_vymyslenou_citaci(zdroje):
-    m = FalesnyModel({"nalezitosti": [{"nalezitosti": [
+    m = FakeModel({"nalezitosti": [{"nalezitosti": [
         {"id": "N1", "text": "Harmonogram", "citace": "harmonogram a hlavní milníky realizace"},
         {"id": "N2", "text": "Pojištění", "citace": "doklad o pojištění odpovědnosti"}]}]})
     n, var = extrahuj_nalezitosti(m, zdroje)
     assert [x.id for x in n] == ["N1"] and "N2" in var[0]
-    assert len(m.volani) == 1
+    assert len(m.calls) == 1
 
 
 def test_nalezitosti_citace_s_jinymi_mezerami_projde(zdroje):
-    m = FalesnyModel({"nalezitosti": [{"nalezitosti": [
+    m = FakeModel({"nalezitosti": [{"nalezitosti": [
         {"id": "N1", "text": "Harmonogram", "citace": "harmonogram  a hlavní\nmilníky realizace"}]}]})
     n, var = extrahuj_nalezitosti(m, zdroje)
     assert [x.id for x in n] == ["N1"] and var == []
@@ -85,32 +85,32 @@ def test_nalezitosti_citace_s_jinymi_mezerami_projde(zdroje):
 
 def test_nalezitosti_zadna_platna_ani_po_oprave(zdroje):
     spatne = {"nalezitosti": [{"id": "N1", "text": "X", "citace": "vymyšlená věta"}]}
-    m = FalesnyModel({"nalezitosti": [spatne, spatne]})
-    with pytest.raises(ChybaModelu) as e:
+    m = FakeModel({"nalezitosti": [spatne, spatne]})
+    with pytest.raises(ModelError) as e:
         extrahuj_nalezitosti(m, zdroje)
-    assert e.value.druh == "nevalidni_vystup" and e.value.sluzba == "Anthropic"
-    assert len(m.volani) == 2 and "## Oprava" in m.volani[1][2]
+    assert e.value.kind == 'invalid_output' and e.value.service == "Anthropic"
+    assert len(m.calls) == 2 and "## Oprava" in m.calls[1][2]
 
 
 def test_nalezitosti_pouziji_effort_extrakce(zdroje):
-    class Zaznamovy(FalesnyModel):
-        def json(self, instrukce, zadani, schema, *, krok, effort=None):
+    class Zaznamovy(FakeModel):
+        def json(self, instrukce, zadani, schema, *, step, effort=None):
             self.effort = effort
-            return super().json(instrukce, zadani, schema, krok=krok, effort=effort)
+            return super().json(instrukce, zadani, schema, step=step, effort=effort)
 
     m = Zaznamovy({"nalezitosti": [{"nalezitosti": [
         {"id": "N1", "text": "Harmonogram", "citace": "harmonogram a hlavní milníky realizace"}]}]})
     extrahuj_nalezitosti(m, zdroje)
     assert m.effort == "medium"
-    assert "harmonogram a hlavní milníky realizace" in m.volani[0][1]
+    assert "harmonogram a hlavní milníky realizace" in m.calls[0][1]
 
 
 # ---------------------------------------------------------------- návrh
 
 def test_navrh_dostane_zdroje_a_bez_podkladu_pokyn_doplnit(zdroje):
-    m = FalesnyModel({"navrh": ["# Nabídka\n\nText."]})
+    m = FakeModel({"navrh": ["# Nabídka\n\nText."]})
     assert napis_navrh(m, zdroje, NALEZITOSTI) == "# Nabídka\n\nText."
-    krok, instrukce, _ = m.volani[0]
+    krok, instrukce, _ = m.calls[0]
     assert krok == "navrh_1"
     assert "harmonogram a hlavní milníky realizace" in instrukce
     assert "Profil firmy nebyl dodán" in instrukce
@@ -122,38 +122,38 @@ def test_navrh_dostane_zdroje_a_bez_podkladu_pokyn_doplnit(zdroje):
 def test_hodnoceni_chybejici_kriterium_opravi_druhym_volanim(zdroje):
     krit = kriteria_test()
     bez_b3 = hodnoceni(8, kriteria=[k for k in krit if k.id != "B3"])
-    m = FalesnyModel({"hodnoceni": [bez_b3, hodnoceni(8)]}, nazev="gpt-6-astra")
+    m = FakeModel({"hodnoceni": [bez_b3, hodnoceni(8)]}, name="gpt-6-astra")
     h, var = ohodnot(m, zdroje, krit, "# Dokument", [], "hodnoceni_1")
     assert {s.id for s in h.kriteria} == {k.id for k in krit} and var == []
-    assert len(m.volani) == 2
-    zadani2 = m.volani[1][2]
+    assert len(m.calls) == 2
+    zadani2 = m.calls[1][2]
     assert "## Oprava" in zadani2 and "B3" in zadani2
-    assert "## Dokument" in m.volani[0][2] and "## Oprava" not in m.volani[0][2]
+    assert "## Dokument" in m.calls[0][2] and "## Oprava" not in m.calls[0][2]
 
 
 def test_hodnoceni_oprava_po_nevalidnim_vystupu_modelu(zdroje):
-    chyba = ChybaModelu("nevalidni_vystup", "OpenAI", detail="neplatný JSON", surova_odpoved="{")
-    m = FalesnyModel({"hodnoceni": [chyba, hodnoceni(8)]}, nazev="gpt-6-astra")
+    chyba = ModelError('invalid_output', "OpenAI", detail="neplatný JSON", raw_response="{")
+    m = FakeModel({"hodnoceni": [chyba, hodnoceni(8)]}, name="gpt-6-astra")
     h, _ = ohodnot(m, zdroje, kriteria_test(), "# Dokument", [], "hodnoceni_1")
-    assert len(m.volani) == 2 and "neplatný JSON" in m.volani[1][2]
+    assert len(m.calls) == 2 and "neplatný JSON" in m.calls[1][2]
 
 
 def test_hodnoceni_jina_chyba_modelu_se_neopakuje(zdroje):
-    m = FalesnyModel({"hodnoceni": [ChybaModelu("pretizeni", "OpenAI"), hodnoceni(8)]}, nazev="gpt-6-astra")
-    with pytest.raises(ChybaModelu) as e:
+    m = FakeModel({"hodnoceni": [ModelError('overloaded', "OpenAI"), hodnoceni(8)]}, name="gpt-6-astra")
+    with pytest.raises(ModelError) as e:
         ohodnot(m, zdroje, kriteria_test(), "# Dokument", [], "hodnoceni_1")
-    assert e.value.druh == "pretizeni" and len(m.volani) == 1
+    assert e.value.kind == 'overloaded' and len(m.calls) == 1
 
 
 def test_hodnoceni_dvakrat_neplatne_vyhodi_chybu_se_surovou_odpovedi(zdroje):
     krit = kriteria_test()
     bez_b3 = hodnoceni(8, kriteria=[k for k in krit if k.id != "B3"])
-    m = FalesnyModel({"hodnoceni": [bez_b3, bez_b3]}, nazev="gpt-6-astra")
-    with pytest.raises(ChybaModelu) as e:
+    m = FakeModel({"hodnoceni": [bez_b3, bez_b3]}, name="gpt-6-astra")
+    with pytest.raises(ModelError) as e:
         ohodnot(m, zdroje, krit, "# Dokument", [], "hodnoceni_1")
-    assert e.value.druh == "nevalidni_vystup" and e.value.sluzba == "OpenAI"
+    assert e.value.kind == 'invalid_output' and e.value.service == "OpenAI"
     assert "B3" in e.value.detail
-    assert e.value.surova_odpoved and Hodnoceni.model_validate_json(e.value.surova_odpoved) == bez_b3
+    assert e.value.raw_response and Hodnoceni.model_validate_json(e.value.raw_response) == bez_b3
 
 
 def test_hodnoceni_platne():
@@ -189,7 +189,7 @@ def test_hodnoceni_orizne_navrhy_podle_priority(zdroje):
     priority = ["nizka", "stredni"] * 4 + ["vysoka", "nizka", "vysoka", "vysoka"]
     h = hodnoceni(8)
     h.navrhy = [_navrh(f"H{i}", p) for i, p in enumerate(priority, start=1)]
-    m = FalesnyModel({"hodnoceni": [h]}, nazev="gpt-6-astra")
+    m = FakeModel({"hodnoceni": [h]}, name="gpt-6-astra")
     vysledek, var = ohodnot(m, zdroje, kriteria_test(), "# Dokument", [], "hodnoceni_1")
     ids = [n.id for n in vysledek.navrhy]
     assert len(ids) == 10
@@ -202,17 +202,17 @@ def test_hodnoceni_orizne_navrhy_podle_priority(zdroje):
 def test_odmitnute_navrhy_jsou_v_instrukci(zdroje):
     odm = [(_navrh("H1-02", text="Přidat certifikaci ISO 27001."),
             _rozhodnuti("H1-02", "odmitnuto", zduvodneni="Certifikace není v podkladech."))]
-    m = FalesnyModel({"hodnoceni": [hodnoceni(8)]}, nazev="gpt-6-astra")
+    m = FakeModel({"hodnoceni": [hodnoceni(8)]}, name="gpt-6-astra")
     ohodnot(m, zdroje, kriteria_test(), "# Dokument", odm, "hodnoceni_2")
-    instrukce = m.volani[0][1]
+    instrukce = m.calls[0][1]
     assert "Přidat certifikaci ISO 27001." in instrukce
     assert "Certifikace není v podkladech." in instrukce
 
 
 def test_bez_odmitnutych_je_v_instrukci_zadne(zdroje):
-    m = FalesnyModel({"hodnoceni": [hodnoceni(8)]}, nazev="gpt-6-astra")
+    m = FakeModel({"hodnoceni": [hodnoceni(8)]}, name="gpt-6-astra")
     ohodnot(m, zdroje, kriteria_test(), "# Dokument", [], "hodnoceni_1")
-    assert "(žádné)" in m.volani[0][1]
+    assert "(žádné)" in m.calls[0][1]
 
 
 # ---------------------------------------------------------------- posouzení
@@ -239,13 +239,13 @@ def test_posud_opravi_chybejici_rozhodnuti(zdroje):
     h = hodnoceni(8, navrhy=3)
     neuplne = posouzeni(h)
     neuplne.rozhodnuti = neuplne.rozhodnuti[:2]
-    m = FalesnyModel({"posouzeni": [neuplne, posouzeni(h)]}, nazev="claude-opus-5-5")
+    m = FakeModel({"posouzeni": [neuplne, posouzeni(h)]}, name="claude-opus-5-5")
     p = posud(m, zdroje, NALEZITOSTI, "# Dokument", h, "posouzeni_1")
-    assert len(p.rozhodnuti) == 3 and len(m.volani) == 2
-    _, instrukce, zadani = m.volani[0]
+    assert len(p.rozhodnuti) == 3 and len(m.calls) == 2
+    _, instrukce, zadani = m.calls[0]
     assert "## Dokument" in zadani and "## Návrhy hodnotitele" in zadani and "V3" in zadani
     assert "harmonogram a hlavní milníky realizace" in instrukce
-    assert "V3" in m.volani[1][2] and "## Oprava" in m.volani[1][2]
+    assert "V3" in m.calls[1][2] and "## Oprava" in m.calls[1][2]
 
 
 def test_prijate_vraci_prijato_a_castecne():
@@ -324,10 +324,10 @@ def test_zapracovani_dostane_jen_prijate(zdroje):
                               _rozhodnuti("H2", "odmitnuto", jak="-"),
                               _rozhodnuti("H3", "castecne", jak="Jen první větu.")], shrnuti="")
     stary = "# Nabídka\n\n" + "Původní text. " * 10
-    m = FalesnyModel({"navrh": [stary + " Doplněno."]}, nazev="claude-opus-5-5")
+    m = FakeModel({"navrh": [stary + " Doplněno."]}, name="claude-opus-5-5")
     novy = zapracuj(m, zdroje, NALEZITOSTI, stary, h, p, "navrh_2")
     assert novy == stary + " Doplněno."
-    krok, instrukce, zadani = m.volani[0]
+    krok, instrukce, zadani = m.calls[0]
     assert krok == "navrh_2"
     assert "## Dokument" in zadani and "## Přijaté návrhy k zapracování" in zadani
     assert "PRIJATY text" in zadani and "CASTECNY text" in zadani
@@ -340,16 +340,16 @@ def test_zapracovani_ztraceny_nadpis_opravi(zdroje):
     h = hodnoceni(8, navrhy=1)
     p = posouzeni(h)
     stary = "# A\ntext\n# B\ntext"
-    m = FalesnyModel({"navrh": ["# A\ntext\ntext", stary + "\nnové"]}, nazev="claude-opus-5-5")
+    m = FakeModel({"navrh": ["# A\ntext\ntext", stary + "\nnové"]}, name="claude-opus-5-5")
     assert zapracuj(m, zdroje, NALEZITOSTI, stary, h, p, "navrh_2") == stary + "\nnové"
-    assert len(m.volani) == 2 and "# B" in m.volani[1][2] and "## Oprava" in m.volani[1][2]
+    assert len(m.calls) == 2 and "# B" in m.calls[1][2] and "## Oprava" in m.calls[1][2]
 
 
 def test_zapracovani_dvakrat_spatne(zdroje):
     h = hodnoceni(8, navrhy=1)
     p = posouzeni(h)
-    m = FalesnyModel({"navrh": ["", ""]}, nazev="claude-opus-5-5")
-    with pytest.raises(ChybaModelu) as e:
+    m = FakeModel({"navrh": ["", ""]}, name="claude-opus-5-5")
+    with pytest.raises(ModelError) as e:
         zapracuj(m, zdroje, NALEZITOSTI, "# A\ntext", h, p, "navrh_2")
-    assert e.value.druh == "nevalidni_vystup" and e.value.sluzba == "Anthropic"
-    assert e.value.surova_odpoved == ""
+    assert e.value.kind == 'invalid_output' and e.value.service == "Anthropic"
+    assert e.value.raw_response == ""

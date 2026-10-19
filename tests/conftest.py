@@ -4,20 +4,20 @@ from pathlib import Path
 
 import pytest
 
-from refiner.modely import podproces
+from refiner.models import subprocess
 
 
-def _zakaz_nastroj(*args, **kwargs):
-    raise RuntimeError("Test se pokusil spustit skutečný nástroj CLI")
+def _forbid_cli(*args, **kwargs):
+    raise RuntimeError("Test attempted to invoke a real provider CLI")
 
 
 @pytest.fixture(autouse=True)
-def _bez_site(monkeypatch):
-    def _zakaz(*args, **kwargs):
-        raise RuntimeError("Test se pokusil o síťové spojení")
+def _offline(monkeypatch):
+    def _forbid_network(*args, **kwargs):
+        raise RuntimeError("Test attempted a network connection")
 
-    monkeypatch.setattr(socket.socket, "connect", _zakaz)
-    monkeypatch.setattr(podproces, "spust", _zakaz_nastroj)
+    monkeypatch.setattr(socket.socket, "connect", _forbid_network)
+    monkeypatch.setattr(subprocess, "run", _forbid_cli)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 

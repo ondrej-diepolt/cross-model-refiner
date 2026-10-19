@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from refiner.data import Hodnoceni, Spotreba, VysledekSkore
-from refiner.modely.falesne import FalesnyModel
+from refiner.models.fakes import FakeModel
 from refiner.smycka import spust_smycku
 from refiner.vystup.prehled import vytvor_prehled
 from tests.pomocne import beh_test, hodnoceni, kriteria_test, odpovedi_skriptu, skript
@@ -52,7 +52,7 @@ def test_prehled_preruseneho_behu_bez_hodnoceni(tmp_path, zdroje):
     pisatel, hodnotitel = odpovedi_skriptu([9.5])
     pisatel["nalezitosti"] = [RuntimeError("Spojení vypadlo")]
     try:
-        spust_smycku(beh, zdroje, FalesnyModel(pisatel, nazev="c"), FalesnyModel(hodnotitel, nazev="g"),
+        spust_smycku(beh, zdroje, FakeModel(pisatel, name="c"), FakeModel(hodnotitel, name="g"),
                      hlaseni=_ticho)
     except Exception:
         pass

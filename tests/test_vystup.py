@@ -3,7 +3,7 @@ import subprocess
 import pypandoc
 
 from refiner.skore import format_skore, spocitej
-from refiner.vstup import nacti_jako_markdown
+from refiner.input import read_as_markdown
 from refiner.vystup.diff import diff_html
 from refiner.vystup.docx import exportuj_docx
 from refiner.vystup.markdown import hodnoceni_md, nalezitosti_md, posouzeni_md
@@ -68,7 +68,7 @@ def test_diff_html_escapuje_html():
 
 def test_exportuj_docx_s_tabulkou(tmp_path):
     exportuj_docx("# Nabídka\n\n| A | B |\n|---|---|\n| 1 | 2 |\n", tmp_path / "x.docx", None)
-    assert nacti_jako_markdown(tmp_path / "x.docx").count("|") >= 6
+    assert read_as_markdown(tmp_path / "x.docx").count("|") >= 6
 
 
 def test_exportuj_docx_se_sablonou(tmp_path):
@@ -77,4 +77,4 @@ def test_exportuj_docx_se_sablonou(tmp_path):
                           capture_output=True, check=True).stdout
     sablona.write_bytes(data)
     exportuj_docx("# Nabídka\n\nText.\n", tmp_path / "y.docx", sablona)
-    assert "Nabídka" in nacti_jako_markdown(tmp_path / "y.docx")
+    assert "Nabídka" in read_as_markdown(tmp_path / "y.docx")
