@@ -34,8 +34,8 @@ def _expected(*groups: str) -> set[str]:
 def _app_root(tmp_path: Path, repo_root: Path) -> Path:
     root = tmp_path / "app"
     root.mkdir()
-    shutil.copyfile(repo_root / "nastaveni.yaml", root / "nastaveni.yaml")
-    for directory in ("profily", "prompty"):
+    shutil.copyfile(repo_root / "settings.yaml", root / "settings.yaml")
+    for directory in ("profiles", "prompty"):
         shutil.copytree(repo_root / directory, root / directory)
     (root / "input").mkdir()
     (root / "input/poptavka.md").write_text(POPTAVKA_TEST, encoding="utf-8")
@@ -92,8 +92,8 @@ def test_existing_output_paths_and_czech_content(tmp_path, koren_repa):
     assert 'href="FINALNI_nabidka.md"' in report and 'href="FINALNI_nabidka.docx"' in report
 
     snapshot = completed.slozka / "data/konfigurace"
-    assert (snapshot / "nastaveni.yaml").read_bytes() == (root / "nastaveni.yaml").read_bytes()
-    assert (snapshot / "profil.yaml").read_bytes() == (root / "profily/nabidka.yaml").read_bytes()
+    assert (snapshot / "nastaveni.yaml").read_bytes() == (root / "settings.yaml").read_bytes()
+    assert (snapshot / "profil.yaml").read_bytes() == (root / "profiles/proposal.yaml").read_bytes()
     assert (snapshot / "kriteria.yaml").read_bytes() == (root / "input/poptavka.kriteria.yaml").read_bytes()
     for prompt in (root / "prompty").glob("*.md"):
         assert (snapshot / "prompty" / prompt.name).read_bytes() == prompt.read_bytes()

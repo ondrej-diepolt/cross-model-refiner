@@ -15,11 +15,11 @@ from tests.pomocne import POPTAVKA_TEST
 
 @pytest.fixture
 def koren(tmp_path, koren_repa) -> Path:
-    """Kořen aplikace v tmp (bez .env): nastaveni.yaml, profily/, prompty/ a input/poptavka.md."""
+    """Kořen aplikace v tmp (bez .env): settings.yaml, profiles/, prompty/ a input/poptavka.md."""
     k = tmp_path / "app"
     k.mkdir()
-    shutil.copy(koren_repa / "nastaveni.yaml", k / "nastaveni.yaml")
-    shutil.copytree(koren_repa / "profily", k / "profily")
+    shutil.copy(koren_repa / "settings.yaml", k / "settings.yaml")
+    shutil.copytree(koren_repa / "profiles", k / "profiles")
     shutil.copytree(koren_repa / "prompty", k / "prompty")
     (k / "input").mkdir()
     (k / "input" / "poptavka.md").write_text(POPTAVKA_TEST, encoding="utf-8")
@@ -110,10 +110,10 @@ def test_hlaseni_neshodi_proud_bez_reconfigure(koren):
 # ---------------------------------------------------------------- chyby uživatele a konfigurace
 
 def _rezim_api(koren: Path) -> None:
-    nastaveni = koren / "nastaveni.yaml"
+    nastaveni = koren / "settings.yaml"
     text = nastaveni.read_text(encoding="utf-8")
-    assert "rezim: predplatne" in text
-    nastaveni.write_text(text.replace("rezim: predplatne", "rezim: api"), encoding="utf-8")
+    assert "mode: subscription" in text
+    nastaveni.write_text(text.replace("mode: subscription", "mode: api"), encoding="utf-8")
 
 
 def test_chybejici_klic(koren):
@@ -165,11 +165,11 @@ def test_porovnat_v_rezimu_api_kontroluje_jen_openai(koren):
 
 
 def _konfigurace_s_rezimem(zdroje, rezim):
-    nastaveni = zdroje.konfigurace.nastaveni
-    modely = nastaveni.modely.model_copy(update={"rezim": rezim})
+    nastaveni = zdroje.konfigurace.settings
+    modely = nastaveni.models.model_copy(update={"mode": rezim})
     return zdroje.konfigurace.__class__(
-        nastaveni.model_copy(update={"modely": modely}), zdroje.konfigurace.profil,
-        zdroje.konfigurace.profil_nazev, zdroje.konfigurace.kriteria_profilu)
+        nastaveni.model_copy(update={"models": modely}), zdroje.konfigurace.profile,
+        zdroje.konfigurace.profile_id, zdroje.konfigurace.profile_criteria, zdroje.konfigurace.output_profile_name)
 
 
 def test_vychozi_tovarna_podle_rezimu(zdroje, monkeypatch):
@@ -181,7 +181,7 @@ def test_vychozi_tovarna_podle_rezimu(zdroje, monkeypatch):
     def typy(dvojice):
         return tuple(type(m).__name__ for m in dvojice)
 
-    predplatne = _konfigurace_s_rezimem(zdroje, "predplatne")
+    predplatne = _konfigurace_s_rezimem(zdroje, "subscription")
     api = _konfigurace_s_rezimem(zdroje, "api")
     assert typy(cli._vychozi_tovarna(predplatne, False)) == ("ClaudeCliModel", "CodexModel")
     assert typy(cli._vychozi_tovarna(api, False)) == ("ClaudeModel", "GptModel")
@@ -199,12 +199,12 @@ def test_predplatne_nepripraveny_nastroj_je_kod_2(koren, monkeypatch):
 
 
 def test_neplatny_rezim_je_kod_2(koren):
-    nastaveni = koren / "nastaveni.yaml"
-    nastaveni.write_text(nastaveni.read_text(encoding="utf-8").replace("rezim: predplatne", "rezim: xyz"),
+    nastaveni = koren / "settings.yaml"
+    nastaveni.write_text(nastaveni.read_text(encoding="utf-8").replace("mode: subscription", "mode: xyz"),
                          encoding="utf-8")
     out = io.StringIO()
     assert main([], koren=koren, vstup_fn=_nepouzivat, vystup=out) == 2
-    assert "modely.rezim" in out.getvalue()
+    assert "models.mode" in out.getvalue()
     assert not (koren / "output").exists() or not any((koren / "output").iterdir())
 
 
@@ -263,7 +263,7 @@ def test_vyber_profilu(koren):
 
 
 def test_jeden_profil_se_nepta(koren):
-    (koren / "profily" / "smernice.yaml").unlink()
+    (koren / "profiles" / "policy.yaml").unlink()
     assert main(["--nanecisto"], koren=koren, vstup_fn=_nepouzivat, vystup=io.StringIO()) == 0
     assert _jediny_beh(koren).stav.profil == "nabidka"
 
@@ -278,10 +278,10 @@ def test_konec_vstupu_pri_vyberu_je_kod_2(koren):
 
 
 def test_chyba_konfigurace_je_kod_2(koren):
-    (koren / "nastaveni.yaml").write_text("smycka: [\n", encoding="utf-8")
+    (koren / "settings.yaml").write_text("loop: [\n", encoding="utf-8")
     out = io.StringIO()
     assert main(["--nanecisto"], koren=koren, vstup_fn=lambda _: "1", vystup=out) == 2
-    assert "nastaveni.yaml" in out.getvalue()
+    assert "settings.yaml" in out.getvalue()
     assert not (koren / "output").exists()
 
 
@@ -414,7 +414,7 @@ def test_pokracovat_bez_hodnoty_jen_beh_jineho_rezimu_je_kod_2(koren):
 
 def test_pokracovat_bere_modely_z_aktualniho_nastaveni(koren, monkeypatch):
     slozka = _preruseny_ostry(koren, monkeypatch)
-    nastaveni = koren / "nastaveni.yaml"
+    nastaveni = koren / "settings.yaml"
     nastaveni.write_text(nastaveni.read_text(encoding="utf-8")
                          .replace("max_output_tokens: 64000", "max_output_tokens: 99000"), encoding="utf-8")
     konfigurace = []
@@ -425,5 +425,5 @@ def test_pokracovat_bere_modely_z_aktualniho_nastaveni(koren, monkeypatch):
 
     assert main(["--pokracovat"], koren=koren, vstup_fn=_nepouzivat, vystup=io.StringIO(),
                 tovarna_modelu=tovarna) == 0
-    assert konfigurace[0].nastaveni.modely.gpt.max_output_tokens == 99000
-    assert "ceny_usd_za_milion" in (slozka / "data" / "beh.log").read_text(encoding="utf-8")
+    assert konfigurace[0].settings.models.gpt.max_output_tokens == 99000
+    assert "prices_usd_per_million" in (slozka / "data" / "beh.log").read_text(encoding="utf-8")

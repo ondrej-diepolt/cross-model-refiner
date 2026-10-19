@@ -1,18 +1,18 @@
 # Nastavení nástroje (modely, smyčka, váhy skupin kritérií, ceny).
-modely:
-  # predplatne = Claude Code (předplatné Max) a Codex CLI (předplatné ChatGPT), bez API klíčů;
+models:
+  # subscription = Claude Code (předplatné Max) a Codex CLI (předplatné ChatGPT), bez API klíčů;
   # api = placené API s klíči v .env (oddíly claude a gpt níže).
-  rezim: predplatne
-  # Modely a effort pro režim predplatne. Volitelné "prikaz" (cesta k programu claude, resp. codex,
-  # když není v PATH) se zadává u claude nebo codex, např. codex: {prikaz: "C:/nastroje/codex.exe"}.
-  predplatne:
-    claude: {model: claude-opus-5-5, effort: high, effort_extrakce: medium}
+  mode: subscription
+  # Modely a effort pro režim subscription. Volitelné "command" (cesta k programu claude, resp. codex,
+  # když není v PATH) se zadává u claude nebo codex, např. codex: {command: "C:/nastroje/codex.exe"}.
+  subscription:
+    claude: {model: claude-opus-5-5, effort: high, extraction_effort: medium}
     codex: {model: gpt-6-astra, effort: high}
-  # Oddíly claude a gpt níže platí jen pro rezim: api.
+  # Oddíly claude a gpt níže platí jen pro mode: api.
   # Claude píše a zapracovává text; effort řídí hloubku uvažování
   # (low, medium, high, xhigh, max). Do max_tokens_* se počítá i uvažování modelu,
   # proto jsou limity vysoké; při hlášce o uříznuté odpovědi je zvyšte.
-  claude: {model: claude-opus-5-5, effort: high, effort_extrakce: medium,
+  claude: {model: claude-opus-5-5, effort: high, extraction_effort: medium,
            max_tokens_text: 64000, max_tokens_json: 32000, fallback: true}
   # GPT je nezávislý hodnotitel. Do max_output_tokens se počítají i tokeny uvažování
   # (reasoning), proto je limit vysoký; při hlášce o uříznuté odpovědi ho zvyšte.
@@ -22,15 +22,15 @@ modely:
   # minut, proto je limit dlouhý.
   timeout_s: 1800
 # Řízení smyčky:
-#   cilove_skore   – cílové celkové skóre (0–10),
-#   max_revizi     – nejvyšší počet revizí (zapracování),
-#   min_nalezitost – minimální skóre každé povinné náležitosti, aby byl cíl splněn,
-#   max_navrhu     – nejvyšší počet návrhů, které smí hodnotitel v jednom hodnocení podat.
-smycka: {cilove_skore: 9.5, max_revizi: 3, min_nalezitost: 8, max_navrhu: 10}
+#   target_score   – cílové celkové skóre (0–10),
+#   max_revisions     – nejvyšší počet revizí (zapracování),
+#   min_requirement_score – minimální skóre každé povinné náležitosti, aby byl cíl splněn,
+#   max_suggestions     – nejvyšší počet návrhů, které smí hodnotitel v jednom hodnocení podat.
+loop: {target_score: 9.5, max_revisions: 3, min_requirement_score: 8, max_suggestions: 10}
 # Váhy skupin: A povinné náležitosti, B obecná kvalita, C fakta. Součet musí být 1.
-vahy_skupin: {A: 0.50, B: 0.35, C: 0.15}
-vychozi_profil: nabidka
+group_weights: {A: 0.50, B: 0.35, C: 0.15}
+default_profile: proposal
 # Ceny v USD za 1 milion tokenů (pro odhad nákladů běhu).
-ceny_usd_za_milion:
-  claude-opus-5-5: {vstup: 4.0, vystup: 20.0}
-  gpt-6-astra: {vstup: 10.0, vystup: 50.0}
+prices_usd_per_million:
+  claude-opus-5-5: {input: 4.0, output: 20.0}
+  gpt-6-astra: {input: 10.0, output: 50.0}

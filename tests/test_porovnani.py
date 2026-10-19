@@ -315,8 +315,8 @@ def koren(tmp_path, koren_repa) -> Path:
     """Kořen aplikace v tmp: konfigurace, prompty, input/poptavka.md a examples/ s referencí."""
     kor = tmp_path / "app"
     kor.mkdir()
-    shutil.copy(koren_repa / "nastaveni.yaml", kor / "nastaveni.yaml")
-    shutil.copytree(koren_repa / "profily", kor / "profily")
+    shutil.copy(koren_repa / "settings.yaml", kor / "settings.yaml")
+    shutil.copytree(koren_repa / "profiles", kor / "profiles")
     shutil.copytree(koren_repa / "prompty", kor / "prompty")
     (kor / "input").mkdir()
     (kor / "input" / "poptavka.md").write_text(POPTAVKA_TEST, encoding="utf-8")
@@ -396,8 +396,8 @@ def test_cli_porovnat_bez_slozky(koren, monkeypatch):
 
 def test_cli_porovnat_jen_s_klicem_openai(koren, monkeypatch):
     _dokonceny_beh_cli(koren)
-    nastaveni = koren / "nastaveni.yaml"   # klíče se kontrolují jen v režimu api
-    nastaveni.write_text(nastaveni.read_text(encoding="utf-8").replace("rezim: predplatne", "rezim: api"),
+    nastaveni = koren / "settings.yaml"   # klíče se kontrolují jen v režimu api
+    nastaveni.write_text(nastaveni.read_text(encoding="utf-8").replace("mode: subscription", "mode: api"),
                          encoding="utf-8")
     out = io.StringIO()
     assert main(["porovnat"], koren=koren, vystup=out) == 2

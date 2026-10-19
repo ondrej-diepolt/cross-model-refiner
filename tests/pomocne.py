@@ -17,7 +17,7 @@ from refiner.data import (
     Kriterium,
     sestav_kriteria,
 )
-from refiner.konfigurace import Nastaveni, nacti_konfiguraci
+from refiner.configuration import Settings, load_configuration
 from refiner.kroky import Zdroje
 from refiner.models.fakes import FakeModel
 
@@ -43,19 +43,19 @@ NALEZITOSTI_TEST = [
 
 def zdroje_test(koren_repa: Path) -> Zdroje:
     """Zdroje s krátkou poptávkou, bez podkladů, s konfigurací a prompty z repa."""
-    konf = nacti_konfiguraci(koren_repa / "nastaveni.yaml", koren_repa / "profily" / "nabidka.yaml")
+    konf = load_configuration(koren_repa / "settings.yaml", koren_repa / "profiles" / "proposal.yaml")
     return Zdroje(poptavka=POPTAVKA_TEST, podklady="", konfigurace=konf, prompty=koren_repa / "prompty")
 
 
-def nastaveni_test() -> Nastaveni:
-    return nacti_konfiguraci(KOREN / "nastaveni.yaml", KOREN / "profily" / "nabidka.yaml").nastaveni
+def nastaveni_test() -> Settings:
+    return load_configuration(KOREN / "settings.yaml", KOREN / "profiles" / "proposal.yaml").settings
 
 
 def kriteria_test(n_nalezitosti: int = 3) -> list[Kriterium]:
-    konf = nacti_konfiguraci(KOREN / "nastaveni.yaml", KOREN / "profily" / "nabidka.yaml")
+    konf = load_configuration(KOREN / "settings.yaml", KOREN / "profiles" / "proposal.yaml")
     nal = [Nalezitost(id=f"N{i}", text=f"Náležitost {i}", citace=f"Citace {i}")
            for i in range(1, n_nalezitosti + 1)]
-    return sestav_kriteria(nal, konf.kriteria_profilu)
+    return sestav_kriteria(nal, konf.profile_criteria)
 
 
 def hodnoceni(
@@ -96,7 +96,7 @@ def posouzeni(h: Hodnoceni, rozhodnuti: str = "prijato") -> Posouzeni:
 
 def beh_test(tmp_path: Path, zdroje: Zdroje) -> Beh:
     """Nový běh s už zapsaným krokem poptavka (01_poptavka.md), jako v reálném toku."""
-    beh = Beh.novy(tmp_path, "poptavka.md", zdroje.konfigurace.profil_nazev, datetime(2026, 10, 17, 9, 0))
+    beh = Beh.novy(tmp_path, "poptavka.md", zdroje.konfigurace.output_profile_name, datetime(2026, 10, 17, 9, 0))
     beh.zapis("poptavka", "poptavka.md", zdroje.poptavka)
     return beh
 

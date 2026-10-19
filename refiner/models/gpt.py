@@ -10,7 +10,7 @@ import pydantic
 from pydantic import BaseModel
 
 from refiner.data import Spotreba as TokenUsage
-from refiner.konfigurace import NastaveniModelu as ModelSettings
+from refiner.configuration import ModelSettings
 from refiner.models.errors import ModelError, parsing_error, convert_exception
 
 T = TypeVar("T", bound=BaseModel)

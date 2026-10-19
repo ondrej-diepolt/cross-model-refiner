@@ -21,17 +21,17 @@ MESSAGES: dict[ErrorKind, str] = {
     'timeout': "Služba {service} neodpověděla včas. Zkuste to znovu přes pokracovat.bat.",
     'invalid_output': "Model {service} vrátil neplatnou odpověď ani po opravě. Surová odpověď je ve složce data/.",
     'truncated': ("Odpověď modelu {service} byla uříznutá (příliš dlouhá). Zvyšte v souboru "
-                 "nastaveni.yaml limit {limit} a spusťte pokracovat.bat."),
+                 "settings.yaml limit {limit} a spusťte pokracovat.bat."),
     'refused': "Model {service} úlohu odmítl (kategorie: {detail}).",
     'other': "Neočekávaná chyba služby {service}: {detail}",
     'not_installed': ("Nástroj {service} není nainstalovaný (příkaz {command} nebyl nalezen). "
-                        "Nainstalujte ho podle README, nebo v nastaveni.yaml přepněte modely.rezim na api."),
+                        "Nainstalujte ho podle README, nebo v settings.yaml přepněte modely.mode na api."),
     'not_authenticated': ("Nástroj {service} není přihlášený předplatným. Přihlaste se příkazem {login} "
                     "a spusťte nástroj znovu (přerušený běh dokončí pokracovat.bat)."),
     'subscription_limit': ("Vyčerpali jste limit předplatného u {service} ({detail}). "
                            "Až se limit obnoví, spusťte pokracovat.bat."),
     'model_unavailable': ("Model {detail} není s vaším předplatným {service} dostupný. "
-                         "Změňte ho v nastaveni.yaml v oddílu modely.predplatne."),
+                         "Změňte ho v settings.yaml v oddílu modely.subscription."),
 }
 # CLI response lengths are not configurable here, so omit limit instructions.
 _CLI_MESSAGES: dict[ErrorKind, str] = {
@@ -39,11 +39,11 @@ _CLI_MESSAGES: dict[ErrorKind, str] = {
 }
 
 _KEYS = {"Anthropic": "ANTHROPIC_API_KEY", "OpenAI": "OPENAI_API_KEY"}
-# Response-length settings in nastaveni.yaml (resumed runs use repository values).
+# Response-length settings in settings.yaml (resumed runs use repository values).
 _COMMANDS = {"Claude Code": "claude", "Codex": "codex"}
 _LOGIN_COMMANDS = {"Claude Code": "claude (v něm /login)", "Codex": "codex login"}
-_LIMITS = {"Anthropic": "max_tokens_json (u textu max_tokens_text) v oddílu modely.claude",
-           "OpenAI": "max_output_tokens v oddílu modely.gpt"}
+_LIMITS = {"Anthropic": "max_tokens_json (u textu max_tokens_text) v oddílu models.claude",
+           "OpenAI": "max_output_tokens v oddílu models.gpt"}
 
 
 class ModelError(Exception):

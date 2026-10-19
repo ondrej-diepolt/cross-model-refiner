@@ -11,7 +11,7 @@ import pydantic
 from pydantic import BaseModel
 
 from refiner.data import Spotreba as TokenUsage
-from refiner.konfigurace import NastaveniModelu as ModelSettings
+from refiner.configuration import ModelSettings
 from refiner.models import subprocess
 from refiner.models.errors import ModelError, ErrorKind, parsing_error, redact_keys
 from refiner.models.subprocess import Runner, ProcessTimeout, ProcessResult
@@ -59,11 +59,11 @@ def _object(text: str) -> dict | None:
 class ClaudeCliModel:
     def __init__(self, settings: ModelSettings, run: Runner | None = None):
         self._n = settings
-        self._c = settings.predplatne.claude
+        self._c = settings.subscription.claude
         self.name = self._c.model
         self._run = run or subprocess.run
         self._usage: list[TokenUsage] = []
-        program = subprocess.find_program("claude", self._c.prikaz)
+        program = subprocess.find_program("claude", self._c.command)
         if program is None:
             raise ModelError('not_installed', _SERVICE)
         self._program = str(program)

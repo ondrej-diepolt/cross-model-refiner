@@ -27,13 +27,13 @@ from refiner.aplikace import (
     porovnej_beh,
     zahaj_beh,
 )
-from refiner.konfigurace import (
-    ChybaKonfigurace,
-    Konfigurace,
-    cesta_kriterii_k_poptavce,
-    dostupne_profily,
-    nacti_konfiguraci,
-    nacti_nastaveni,
+from refiner.configuration import (
+    ConfigurationError,
+    Configuration,
+    criteria_path_for_request,
+    available_profiles,
+    load_configuration,
+    load_settings,
 )
 from refiner.models.errors import ModelError, Service
 from refiner.models.claude import ClaudeModel
@@ -43,7 +43,7 @@ from refiner.models.fakes import demo_models
 from refiner.models.gpt import GptModel
 from refiner.models.interface import Model
 from refiner.porovnani import nacti_referenci, najdi_referenci
-from refiner.input import InputError, find_inputs
+from refiner.input import InputError, find_inputs, find_template, resolve_materials_directory
 
 KOREN = Path(__file__).resolve().parent.parent
 
@@ -53,7 +53,7 @@ KLIC_HODNOTITELE: tuple[tuple[str, Service], ...] = (("OPENAI_API_KEY", "OpenAI"
 HLASKA_VZOR_ENV = "Vzor najdete v souboru .env.example."
 HLASKA_ENV_KODOVANI = "Soubor .env nelze přečíst – uložte ho v kódování UTF-8."
 HLASKA_ZADNY_VSTUP = "Ve složce input/ není žádná poptávka (DOCX, MD nebo TXT)."
-HLASKA_ZADNY_PROFIL = "Ve složce profily/ není žádný profil dokumentu (*.yaml)."
+HLASKA_ZADNY_PROFIL = "Ve složce profiles/ není žádný profil dokumentu (*.yaml)."
 HLASKA_ZADNY_PRERUSENY = ("Ve složce output/ není žádný přerušený ostrý běh, ve kterém by šlo pokračovat "
                           "(ukázkové běhy se dokončují s volbou --nanecisto).")
 HLASKA_ZADNY_PRERUSENY_NANECISTO = ("Ve složce output/ není žádný přerušený ukázkový běh (--nanecisto), "
@@ -67,7 +67,7 @@ HLASKA_NANECISTO = "Ukázkový režim --nanecisto: falešné modely, bez volán�
 
 PRERUSENE_STAVY = {"prerusen", "bezi"}
 
-TovarnaModelu = Callable[[Konfigurace, bool], tuple[Model, Model]]
+TovarnaModelu = Callable[[Configuration, bool], tuple[Model, Model]]
 
 
 # ---------------------------------------------------------------- konzole
@@ -138,18 +138,18 @@ def _vyber(konzole: _Konzole, vstup_fn: Callable[[str], str], otazka: str, mozno
 
 # ---------------------------------------------------------------- příprava běhu
 
-def _vychozi_tovarna(konfigurace: Konfigurace, nanecisto: bool) -> tuple[Model, Model]:
+def _vychozi_tovarna(konfigurace: Configuration, nanecisto: bool) -> tuple[Model, Model]:
     if nanecisto:
         return demo_models()
-    modely = konfigurace.nastaveni.modely
-    if modely.rezim == "api":
+    modely = konfigurace.settings.models
+    if modely.mode == "api":
         return ClaudeModel(modely), GptModel(modely)
     return ClaudeCliModel(modely), CodexModel(modely)
 
 
-def _vychozi_hodnotitel(konfigurace: Konfigurace) -> Model:
-    modely = konfigurace.nastaveni.modely
-    return GptModel(modely) if modely.rezim == "api" else CodexModel(modely)
+def _vychozi_hodnotitel(konfigurace: Configuration) -> Model:
+    modely = konfigurace.settings.models
+    return GptModel(modely) if modely.mode == "api" else CodexModel(modely)
 
 
 def _chybejici_klice(klice: tuple[tuple[str, Service], ...] = KLICE) -> list[Service]:
@@ -164,13 +164,13 @@ def _otazka_profilu(nazvy: list[str]) -> str:
 
 
 def _zvol_profil(koren: Path, konzole: _Konzole, vstup_fn: Callable[[str], str]) -> str:
-    profily = dostupne_profily(koren / "profily")
+    profily = available_profiles(koren / "profiles")
     if not profily:
-        raise ChybaKonfigurace(HLASKA_ZADNY_PROFIL)
+        raise ConfigurationError(HLASKA_ZADNY_PROFIL)
     if len(profily) == 1:
         return profily[0]
-    nastaveni = koren / "nastaveni.yaml"
-    nazvy = [nacti_konfiguraci(nastaveni, koren / "profily" / f"{p}.yaml").profil.nazev for p in profily]
+    nastaveni = koren / "settings.yaml"
+    nazvy = [load_configuration(nastaveni, koren / "profiles" / f"{p}.yaml").profile.name for p in profily]
     return profily[_vyber(konzole, vstup_fn, _otazka_profilu(nazvy), nazvy)]
 
 
@@ -260,7 +260,7 @@ def _spust(
     vstup_fn: Callable[[str], str],
     konzole: _Konzole,
     tovarna: TovarnaModelu,
-    hodnotitel_fn: Callable[[Konfigurace], Model],
+    hodnotitel_fn: Callable[[Configuration], Model],
     otevrit_prehled: bool,
 ) -> int:
     porovnat = args.prikaz == "porovnat"
@@ -275,10 +275,10 @@ def _spust(
     if args.nanecisto:
         konzole(HLASKA_NANECISTO)
     else:
-        # Oddíl modely (a tedy režim) se bere vždy z nastaveni.yaml v repozitáři, i při --pokracovat.
+        # Oddíl models (a tedy režim) se bere vždy ze settings.yaml v repozitáři, i při --pokracovat.
         try:
-            rezim = nacti_nastaveni(koren / "nastaveni.yaml").modely.rezim
-        except ChybaKonfigurace as e:
+            rezim = load_settings(koren / "settings.yaml").models.mode
+        except ConfigurationError as e:
             konzole(str(e))
             return 2
         if rezim == "api":
@@ -306,23 +306,23 @@ def _spust(
             if slozka is None:
                 konzole(HLASKA_ZADNY_PRERUSENY_NANECISTO if args.nanecisto else HLASKA_ZADNY_PRERUSENY)
                 return 2
-            # Oddíl modely (limity, časový limit) a ceny z aktuálního nastaveni.yaml, zbytek z kopie běhu.
+            # Oddíl models (limity, časový limit) a ceny z aktuálního settings.yaml, zbytek z kopie běhu.
             beh, zdroje = obnov_beh(slozka, koren=koren, nanecisto=args.nanecisto, hlaseni=konzole)
             konzole(f"Pokračuji v běhu: {beh.slozka}")
             pisatel, hodnotitel = tovarna(zdroje.konfigurace, args.nanecisto)
         else:
             vstup = _zvol_vstup(koren, konzole, vstup_fn)
             profil = _zvol_profil(koren, konzole, vstup_fn)
-            konfigurace = nacti_konfiguraci(
-                koren / "nastaveni.yaml",
-                koren / "profily" / f"{profil}.yaml",
-                cesta_kriterii_k_poptavce(vstup),
+            konfigurace = load_configuration(
+                koren / "settings.yaml",
+                koren / "profiles" / f"{profil}.yaml",
+                criteria_path_for_request(vstup),
             )
             pisatel, hodnotitel = tovarna(konfigurace, args.nanecisto)
-            konzole(f"Poptávka: {vstup.name}, profil: {konfigurace.profil.nazev}")
+            konzole(f"Poptávka: {vstup.name}, profil: {konfigurace.profile.name}")
             beh, zdroje = zahaj_beh(koren, vstup, profil, datetime.now(), nanecisto=args.nanecisto)
             konzole(f"Složka běhu: {beh.slozka}")
-    except (ChybaKonfigurace, InputError) as e:
+    except (ConfigurationError, InputError) as e:
         konzole(str(e))
         return 2
     except ModelError as e:
@@ -342,9 +342,9 @@ def _spust(
         kod = porovnej_beh(beh, zdroje, reference_md, hodnotitel, konzole, reference.name)
         html = "porovnani.html"
     else:
-        sablona = koren / "podklady" / "sablona.docx"
+        sablona = find_template(resolve_materials_directory(koren))
         kod = dokonci(beh, zdroje, pisatel, hodnotitel, konzole,
-                      sablona if sablona.is_file() else None)
+                      sablona)
         html = "prehled.html"
     if kod == 0 and otevrit_prehled:
         try:

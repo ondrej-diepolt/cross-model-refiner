@@ -17,11 +17,11 @@ T = datetime(2026, 10, 17, 9, 0)
 
 @pytest.fixture
 def koren(tmp_path, koren_repa) -> Path:
-    """Kořen aplikace v tmp: kopie nastaveni.yaml, profily/, prompty/ a input/poptavka.md."""
+    """Kořen aplikace v tmp: kopie settings.yaml, profiles/, prompty/ a input/poptavka.md."""
     k = tmp_path / "app"
     k.mkdir()
-    shutil.copy(koren_repa / "nastaveni.yaml", k / "nastaveni.yaml")
-    shutil.copytree(koren_repa / "profily", k / "profily")
+    shutil.copy(koren_repa / "settings.yaml", k / "settings.yaml")
+    shutil.copytree(koren_repa / "profiles", k / "profiles")
     shutil.copytree(koren_repa / "prompty", k / "prompty")
     (k / "input").mkdir()
     (k / "input" / "poptavka.md").write_text(POPTAVKA_TEST, encoding="utf-8")
@@ -48,14 +48,14 @@ def test_zahaj_beh_zkopiruje_konfiguraci_a_vstup(koren):
     assert (konf / "prompty" / "navrh.md").exists()
     assert (konf / "nastaveni.yaml").exists()
     assert (konf / "profil.yaml").read_text(encoding="utf-8") == \
-        (koren / "profily" / "nabidka.yaml").read_text(encoding="utf-8")
+        (koren / "profiles" / "proposal.yaml").read_text(encoding="utf-8")
     assert (konf / "kriteria.yaml").exists()
     assert z.prompty == beh.slozka / "data" / "konfigurace" / "prompty"
     assert z.poptavka == POPTAVKA_TEST
     assert "Firma Alfa s.r.o." in z.podklady
     assert "Firma Alfa s.r.o." in (beh.slozka / "data" / "podklady.md").read_text(encoding="utf-8")
-    assert z.konfigurace.profil_nazev == "nabidka"
-    assert {k.id: k.vaha for k in z.konfigurace.kriteria_profilu}["B1"] == 2
+    assert z.konfigurace.profile_id == "proposal"
+    assert {k.id: k.weight for k in z.konfigurace.profile_criteria}["B1"] == 2
     assert beh.stav.profil == "nabidka" and beh.stav.vstup == "poptavka.md"
 
 
@@ -78,18 +78,18 @@ def test_zahaj_beh_crlf_vstup_nezdvoji_radky(koren):
 
 def test_obnoveni_pouzije_kopii_konfigurace(koren):
     beh, _ = _zahaj(koren)
-    nastaveni = koren / "nastaveni.yaml"
-    nastaveni.write_text(nastaveni.read_text(encoding="utf-8").replace("max_revizi: 3", "max_revizi: 1"),
+    nastaveni = koren / "settings.yaml"
+    nastaveni.write_text(nastaveni.read_text(encoding="utf-8").replace("max_revisions: 3", "max_revisions: 1"),
                          encoding="utf-8")
     (koren / "prompty" / "navrh.md").write_text("ZMĚNĚNO", encoding="utf-8")
 
     beh2, z2 = obnov_beh(beh.slozka)
 
     assert beh2.slozka == beh.slozka
-    assert z2.konfigurace.nastaveni.smycka.max_revizi == 3
+    assert z2.konfigurace.settings.loop.max_revisions == 3
     assert z2.prompty == beh.slozka / "data" / "konfigurace" / "prompty"
     assert (z2.prompty / "navrh.md").read_text(encoding="utf-8") != "ZMĚNĚNO"
-    assert z2.konfigurace.profil_nazev == "nabidka"
+    assert z2.konfigurace.profile_id == "proposal"
     assert z2.poptavka == POPTAVKA_TEST
     # obnovení nepřepisuje existující kroky
     assert list(beh2.stav.kroky) == ["poptavka"] and beh2.stav.kroky["poptavka"].cislo == 1
@@ -105,24 +105,24 @@ def _uprav(soubor: Path, *nahrady: tuple[str, str]) -> None:
 
 def test_obnoveni_s_korenem_bere_modely_a_ceny_z_repozitare(koren):
     beh, _ = _zahaj(koren)
-    _uprav(koren / "nastaveni.yaml",
+    _uprav(koren / "settings.yaml",
            ("max_tokens_json: 32000", "max_tokens_json: 50000"),
            ("max_output_tokens: 64000", "max_output_tokens: 99000"),
-           ("claude-opus-5-5: {vstup: 4.0", "claude-opus-5-5: {vstup: 7.0"),
-           ("max_revizi: 3", "max_revizi: 1"))
+           ("claude-opus-5-5: {input: 4.0", "claude-opus-5-5: {input: 7.0"),
+           ("max_revisions: 3", "max_revisions: 1"))
     (koren / "prompty" / "navrh.md").write_text("ZMĚNĚNO", encoding="utf-8")
     hlasky: list[str] = []
 
     _, z = obnov_beh(beh.slozka, koren=koren, hlaseni=hlasky.append)
 
-    n = z.konfigurace.nastaveni
-    assert n.modely.claude.max_tokens_json == 50000 and n.modely.gpt.max_output_tokens == 99000
-    assert n.ceny_usd_za_milion["claude-opus-5-5"].vstup == 7.0
+    n = z.konfigurace.settings
+    assert n.models.claude.max_tokens_json == 50000 and n.models.gpt.max_output_tokens == 99000
+    assert n.prices_usd_per_million["claude-opus-5-5"].input == 7.0
     # Smyčka, profil a prompty zůstávají z kopie běhu (reprodukovatelné skóre).
-    assert n.smycka.max_revizi == 3
+    assert n.loop.max_revisions == 3
     assert (z.prompty / "navrh.md").read_text(encoding="utf-8") != "ZMĚNĚNO"
     log = (beh.slozka / "data" / "beh.log").read_text(encoding="utf-8")
-    assert "modely" in log and "nastaveni.yaml" in log and "kopie" in log
+    assert "models" in log and "settings.yaml" in log and "kopie" in log
     # Kopie konfigurace ve složce běhu se nemění.
     assert "max_tokens_json: 32000" in (beh.slozka / "data" / "konfigurace" / "nastaveni.yaml") \
         .read_text(encoding="utf-8")
@@ -131,7 +131,7 @@ def test_obnoveni_s_korenem_bere_modely_a_ceny_z_repozitare(koren):
 @pytest.mark.parametrize("pokazit", ["smazat", "neplatny"])
 def test_obnoveni_s_vadnym_nastavenim_v_repozitari_pouzije_kopii(koren, pokazit):
     beh, _ = _zahaj(koren)
-    nastaveni = koren / "nastaveni.yaml"
+    nastaveni = koren / "settings.yaml"
     if pokazit == "smazat":
         nastaveni.unlink()
     else:
@@ -140,10 +140,10 @@ def test_obnoveni_s_vadnym_nastavenim_v_repozitari_pouzije_kopii(koren, pokazit)
 
     _, z = obnov_beh(beh.slozka, koren=koren, hlaseni=hlasky.append)
 
-    assert z.konfigurace.nastaveni.modely.claude.max_tokens_json == 32000
+    assert z.konfigurace.settings.models.claude.max_tokens_json == 32000
     assert any("Varování" in h and "kopie" in h for h in hlasky)
     log = (beh.slozka / "data" / "beh.log").read_text(encoding="utf-8")
-    assert "WARNING" in log and "nastaveni.yaml" in log
+    assert "WARNING" in log and "settings.yaml" in log
 
 
 def test_obnoveni_rezim_musi_odpovidat(koren):

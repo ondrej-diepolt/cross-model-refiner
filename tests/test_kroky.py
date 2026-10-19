@@ -1,7 +1,7 @@
 import pytest
 
 from refiner.data import Hodnoceni, Navrh, Posouzeni, Rozhodnuti, Nalezitost
-from refiner.konfigurace import ChybaKonfigurace
+from refiner.configuration import ConfigurationError
 from refiner.kroky import (
     extrahuj_nalezitosti,
     napis_navrh,
@@ -55,7 +55,7 @@ def test_vsechny_prompty_se_vykresli(koren_repa):
 
 def test_chybejici_promenna_v_promptu(tmp_path):
     (tmp_path / "pokus.md").write_text("Ahoj ${jmeno} a ${neznama}.", encoding="utf-8")
-    with pytest.raises(ChybaKonfigurace) as e:
+    with pytest.raises(ConfigurationError) as e:
         vykresli_prompt(tmp_path, "pokus", jmeno="Petr")
     assert "pokus.md" in str(e.value) and "neznama" in str(e.value)
 

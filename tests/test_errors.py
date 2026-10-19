@@ -36,7 +36,7 @@ def test_authentication_message_names_variable():
 def test_truncated_message_explains_limits():
     claude = ModelError('truncated', "Anthropic").message
     gpt = ModelError('truncated', "OpenAI").message
-    assert "uříznutá" in claude and "nastaveni.yaml" in claude and "pokracovat.bat" in claude
+    assert "uříznutá" in claude and "settings.yaml" in claude and "pokracovat.bat" in claude
     assert "max_tokens_json" in claude and "max_output_tokens" not in claude
     assert "max_output_tokens" in gpt and "max_tokens_json" not in gpt
     assert "ani po opakování" not in claude
@@ -63,7 +63,7 @@ def test_detail_does_not_contain_key():
 @pytest.mark.parametrize('service,command', [("Claude Code", "claude"), ("Codex", "codex")])
 def test_not_installed_names_command(service, command):
     h = ModelError('not_installed', service).message
-    assert f"příkaz {command} nebyl nalezen" in h and "modely.rezim na api" in h
+    assert f"příkaz {command} nebyl nalezen" in h and "modely.mode na api" in h
 
 
 def test_unauthenticated_codex_explains_login():
@@ -85,11 +85,11 @@ def test_unavailable_model_names_model():
 
 def test_truncated_cli_omits_limit_reference():
     h = ModelError('truncated', "Codex").message
-    assert "uříznutá" in h and "nastaveni.yaml" not in h
+    assert "uříznutá" in h and "settings.yaml" not in h
 
 
 def test_truncated_api_references_limit():
-    assert "nastaveni.yaml" in ModelError('truncated', "OpenAI").message
+    assert "settings.yaml" in ModelError('truncated', "OpenAI").message
 
 
 def test_cli_timeout():

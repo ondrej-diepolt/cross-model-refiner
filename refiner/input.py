@@ -8,7 +8,7 @@ from pathlib import Path
 import pypandoc
 
 SUPPORTED_EXTENSIONS = (".docx", ".md", ".txt")
-TEMPLATE_NAME = "sablona.docx"
+TEMPLATE_NAMES = ("template.docx", "sablona.docx")
 
 
 class InputError(Exception):
@@ -60,10 +60,24 @@ def read_materials(directory: Path) -> str:
         return ""
     parts = []
     for p in find_inputs(directory):
-        if p.name.lower() == TEMPLATE_NAME:
+        if p.name.lower() in TEMPLATE_NAMES:
             continue
         parts.append(f"## Podklad: {p.name}\n\n{read_as_markdown(p).strip()}")
     return "\n\n".join(parts)
+
+
+def resolve_materials_directory(root: Path) -> Path:
+    """Prefer English materials; use a legacy directory without combining or moving it."""
+    current = root / "materials"
+    if current.is_dir():
+        return current
+    legacy = root / "podklady"
+    return legacy if legacy.is_dir() else current
+
+
+def find_template(directory: Path) -> Path | None:
+    """Select the English template first within the chosen materials directory."""
+    return next((path for name in TEMPLATE_NAMES if (path := directory / name).is_file()), None)
 
 
 def slug(text: str, max_length: int = 60) -> str:

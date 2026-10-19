@@ -12,7 +12,7 @@ from openai.lib._pydantic import to_strict_json_schema
 from pydantic import BaseModel
 
 from refiner.data import Spotreba as TokenUsage
-from refiner.konfigurace import NastaveniModelu as ModelSettings
+from refiner.configuration import ModelSettings
 from refiner.models import subprocess
 from refiner.models.errors import ModelError, ErrorKind, parsing_error, redact_keys
 from refiner.models.subprocess import Runner, ProcessTimeout, ProcessResult
@@ -77,11 +77,11 @@ def read_events(stdout: str) -> tuple[dict | None, list[str], set[str]]:
 class CodexModel:
     def __init__(self, settings: ModelSettings, run: Runner | None = None):
         self._n = settings
-        self._c = settings.predplatne.codex
+        self._c = settings.subscription.codex
         self.name = self._c.model
         self._run = run or subprocess.run
         self._usage: list[TokenUsage] = []
-        program = subprocess.find_program("codex", self._c.prikaz)
+        program = subprocess.find_program("codex", self._c.command)
         if program is None:
             raise ModelError('not_installed', _SERVICE)
         self._program = str(subprocess.native_codex(program))

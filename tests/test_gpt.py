@@ -5,14 +5,14 @@ import openai
 import pytest
 
 from refiner.data import Hodnoceni as Evaluation, Spotreba as TokenUsage
-from refiner.konfigurace import NastaveniClaude as ClaudeSettings, NastaveniGpt as GptSettings, NastaveniModelu as ModelSettings
+from refiner.configuration import ClaudeSettings, GptSettings, ModelSettings
 from refiner.models.errors import ModelError
 from refiner.models.gpt import GptModel
 
 
 def settings() -> ModelSettings:
     return ModelSettings(
-        claude=ClaudeSettings(model="c", effort="high", effort_extrakce="low",
+        claude=ClaudeSettings(model="c", effort="high", extraction_effort="low",
                                max_tokens_text=1, max_tokens_json=1, fallback=True),
         gpt=GptSettings(model="gpt-x", effort="high", max_output_tokens=5000),
         max_retries=2, timeout_s=30.0)

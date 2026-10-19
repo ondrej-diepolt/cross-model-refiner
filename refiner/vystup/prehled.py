@@ -6,10 +6,11 @@ from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader
 
+from refiner.artifacts import MATERIALS_FILE, OVERVIEW_FILE
 from refiner.beh import Beh
 from refiner.data import Hodnoceni, Posouzeni, Spotreba, VystupNalezitosti, sestav_kriteria
 from refiner.facts import find_placeholders, find_suspicious_facts
-from refiner.konfigurace import Konfigurace
+from refiner.configuration import Configuration
 from refiner.skore import format_skore
 
 _SABLONY = Path(__file__).parent / "sablony"
@@ -76,14 +77,14 @@ def _bunka(hodnota: float | None, titulek: str = "") -> dict:
     return {"text": format_skore(hodnota), "trida": _trida_skore(hodnota), "titulek": titulek}
 
 
-def _tabulka(beh: Beh, konf: Konfigurace, hodnoceni: dict[int, Hodnoceni], cisla: list[int]) -> list[dict]:
+def _tabulka(beh: Beh, konf: Configuration, hodnoceni: dict[int, Hodnoceni], cisla: list[int]) -> list[dict]:
     """Řádky tabulky skóre; vše se hledá podle čísla hodnocení (ID se v kolech opakují)."""
     if not cisla:
         return []
     kriteria = []
     if beh.hotovo("nalezitosti") and beh.stav.kroky["nalezitosti"].data:
         kriteria = sestav_kriteria(beh.data("nalezitosti", VystupNalezitosti).nalezitosti,
-                                   konf.kriteria_profilu)
+                                   konf.profile_criteria)
     skore = beh.stav.skore
 
     def ze_skore(atribut: str) -> list[dict]:
@@ -121,9 +122,9 @@ def _je_openai(model: str) -> bool:
     return model.lower().startswith("gpt")
 
 
-def _cena(spotreba: list[Spotreba], konf: Konfigurace) -> dict:
+def _cena(spotreba: list[Spotreba], konf: Configuration) -> dict:
     """Souhrn po modelech; `vstup` v řádcích je vždy vstup bez tokenů z cache (u obou služeb)."""
-    ceny = konf.nastaveni.ceny_usd_za_milion
+    ceny = konf.settings.prices_usd_per_million
     souhrn: dict[tuple[str, bool], dict] = {}
     for s in spotreba:
         r = souhrn.setdefault((s.model, s.predplatne), {
@@ -146,11 +147,11 @@ def _cena(spotreba: list[Spotreba], konf: Konfigurace) -> dict:
             cena_txt = "cena neznámá"
         else:
             if _je_openai(r["model"]):
-                cache = r["cache_cteni"] * NASOBEK_CTENI_CACHE_OPENAI * c.vstup
+                cache = r["cache_cteni"] * NASOBEK_CTENI_CACHE_OPENAI * c.input
             else:
                 cache = (r["cache_cteni"] * NASOBEK_CTENI_CACHE_ANTHROPIC
-                         + r["cache_zapis"] * NASOBEK_ZAPIS_CACHE_ANTHROPIC) * c.vstup
-            cena = (r["vstup"] * c.vstup + cache + r["vystup"] * c.vystup) / 1_000_000
+                         + r["cache_zapis"] * NASOBEK_ZAPIS_CACHE_ANTHROPIC) * c.input
+            cena = (r["vstup"] * c.input + cache + r["vystup"] * c.output) / 1_000_000
             celkem += cena
             cena_txt = f"{_desetinne(cena)} USD"
         radky.append({**r, "cena": cena_txt})
@@ -175,13 +176,13 @@ def _kroky(beh: Beh) -> list[dict]:
     return vysledek
 
 
-def vytvor_prehled(beh: Beh, konfigurace: Konfigurace) -> Path:
+def vytvor_prehled(beh: Beh, konfigurace: Configuration) -> Path:
     stav = beh.stav
     hodnoceni = _nacti_hodnoceni(beh)
     posouzeni = _nacti_posouzeni(beh)
     skore = {int(k): v for k, v in stav.skore.items()}
     cisla = sorted(set(hodnoceni) | set(skore))
-    nastaveni = konfigurace.nastaveni
+    nastaveni = konfigurace.settings
 
     finalni = stav.finalni_verze if stav.stav == "dokoncen" else None
     fin_skore = skore.get(finalni) if finalni is not None else None
@@ -190,10 +191,10 @@ def vytvor_prehled(beh: Beh, konfigurace: Konfigurace) -> Path:
     duvod = None
     if stav.stav == "dokoncen":
         if stav.duvod_ukonceni == "cil_splnen":
-            cil = format_skore(nastaveni.smycka.cilove_skore)
+            cil = format_skore(nastaveni.loop.target_score)
             duvod = f"Cíl splněn (skóre {format_skore(fin_skore.celkem) if fin_skore else '?'} ≥ {cil})"
         elif stav.duvod_ukonceni == "limit_revizi":
-            duvod = f"Vyčerpán limit {nastaveni.smycka.max_revizi} revizí"
+            duvod = f"Vyčerpán limit {nastaveni.loop.max_revisions} revizí"
         elif stav.duvod_ukonceni == "zadna_zmena":
             duvod = "Hodnotitel nenavrhl nic, co by prošlo posouzením"
         else:
@@ -248,7 +249,7 @@ def vytvor_prehled(beh: Beh, konfigurace: Konfigurace) -> Path:
             soucet[k] += radek[k]
         kola.append(radek)
 
-    nazev_finalu = f"FINALNI_{konfigurace.profil_nazev}"
+    nazev_finalu = f"FINALNI_{konfigurace.output_profile_name}"
     soubory = [{"soubor": f"{nazev_finalu}{pripona}",
                 "existuje": (beh.slozka / f"{nazev_finalu}{pripona}").exists()}
                for pripona in (".docx", ".md")]
@@ -262,6 +263,6 @@ def vytvor_prehled(beh: Beh, konfigurace: Konfigurace) -> Path:
         placeholdery=placeholdery, tvrzeni=tvrzeni, podezrele=podezrele,
         kroky=_kroky(beh), kola=kola, soucet=soucet, cena=_cena(stav.spotreba, konfigurace),
         doba=_doba(beh), vytvoreno=f"{stav.vytvoreno:%d. %m. %Y %H:%M}",
-        profil=konfigurace.profil_nazev,
+        profil=konfigurace.output_profile_name,
     )
-    return beh.zapis_pevny("prehled.html", html)
+    return beh.zapis_pevny(OVERVIEW_FILE, html)

@@ -14,6 +14,7 @@ from typing import Literal, TypeVar
 from jinja2 import Environment, FileSystemLoader
 from pydantic import BaseModel
 
+from refiner.artifacts import COMPARISON_FILE, COMPARISON_FORM
 from refiner.beh import Beh
 from refiner.data import (
     Hodnoceni,
@@ -39,7 +40,6 @@ from refiner.input import SUPPORTED_EXTENSIONS, InputError, read_as_markdown, fi
 _SABLONY = Path(__file__).parent / "vystup" / "sablony"
 
 PROMPTY_POROVNANI = ("porovnani_kriteria", "porovnani_prvky", "porovnani_pokryti")
-FORMULAR = "porovnani_formular.md"
 OTAZKY_FORMULARE = (
     "Odeslal bych to po doplnění placeholderů?",
     "Kolik minut práce do odeslatelné verze?",
@@ -258,16 +258,16 @@ def _html(beh: Beh, zdroje: Zdroje, kriteria: list[Kriterium], v: VysledekPorovn
     )
     pocty_pokryti = {s: sum(1 for r in pokryti if r["stav"] == s) for s in _PORADI_POKRYTI}
 
-    nazev_finalu = f"FINALNI_{zdroje.konfigurace.profil_nazev}.md"
+    nazev_finalu = f"FINALNI_{zdroje.konfigurace.output_profile_name}.md"
     env = Environment(loader=FileSystemLoader(_SABLONY), autoescape=True)
     return env.get_template("porovnani.html.j2").render(
         slozka=beh.slozka.name, reference=nazev_reference, finalni=finalni,
         finalni_soubor=nazev_finalu if (beh.slozka / nazev_finalu).exists() else None,
-        veta=_veta_kalibrace(v.skore_reference, zdroje.konfigurace.nastaveni.smycka.cilove_skore),
+        veta=_veta_kalibrace(v.skore_reference, zdroje.konfigurace.settings.loop.target_score),
         cil_splnen=v.skore_reference.cil_splnen,
         vymyslena_fakta=len(kalibrace.vymyslena_fakta),
         kalibrace=kalibrace_radky, souhrn=souhrn, srovnani=srovnani, pocty=pocty,
-        pokryti=pokryti, pocty_pokryti=pocty_pokryti, formular=FORMULAR,
+        pokryti=pokryti, pocty_pokryti=pocty_pokryti, formular=COMPARISON_FORM,
     )
 
 
@@ -294,12 +294,12 @@ def porovnej(
 
     konf = zdroje.konfigurace
     nalezitosti = beh.data("nalezitosti", VystupNalezitosti).nalezitosti
-    kriteria = sestav_kriteria(nalezitosti, konf.kriteria_profilu)
+    kriteria = sestav_kriteria(nalezitosti, konf.profile_criteria)
     generovana = beh.text(f"navrh_{finalni}")
     skore_generovane = beh.stav.skore[str(finalni)]
 
     # Všechny prompty se vykreslí před prvním voláním: chybějící soubor nestojí žádné tokeny.
-    promenne = {**spolecne_promenne(zdroje), "typ_dokumentu": konf.profil.typ_dokumentu,
+    promenne = {**spolecne_promenne(zdroje), "typ_dokumentu": konf.profile.document_type,
                 "kriteria": text_kriterii(kriteria)}
     instrukce = {n: vykresli_prompt(zdroje.prompty, n, **promenne) for n in PROMPTY_POROVNANI}
 
@@ -316,7 +316,7 @@ def porovnej(
     try:
         hlaseni("[1/5] Kalibrace: hodnocení reference stejnými kritérii…")
         kalibrace, _ = ohodnot(hodnotitel, zdroje, kriteria, reference_md, [], krok="porovnani_kalibrace")
-        skore_reference = spocitej(kalibrace, kriteria, konf.nastaveni)
+        skore_reference = spocitej(kalibrace, kriteria, konf.settings)
         hlaseni(f"hotovo, skóre reference {format_skore(skore_reference.celkem)} "
                 f"(finální verze {format_skore(skore_generovane.celkem)})")
 
@@ -359,7 +359,7 @@ def porovnej(
     )
     beh.zapis_pevny("data/porovnani.json", vysledek.model_dump_json(indent=2))
     beh.zapis_pevny("data/porovnani_kalibrace.json", kalibrace.model_dump_json(indent=2))
-    if not (beh.slozka / FORMULAR).exists():
-        beh.zapis_pevny(FORMULAR, _formular(beh, nazev_reference))
+    if not (beh.slozka / COMPARISON_FORM).exists():
+        beh.zapis_pevny(COMPARISON_FORM, _formular(beh, nazev_reference))
     return beh.zapis_pevny(
-        "porovnani.html", _html(beh, zdroje, kriteria, vysledek, kalibrace, nazev_reference))
+        COMPARISON_FILE, _html(beh, zdroje, kriteria, vysledek, kalibrace, nazev_reference))

@@ -68,3 +68,39 @@ def test_missing_materials(tmp_path):
 def test_slug():
     assert slug("Národní rozvojová banka") == "narodni-rozvojova-banka"
     assert len(slug("a" * 100)) <= 60
+
+
+def test_english_materials_precede_legacy_without_combining(tmp_path):
+    from refiner.input import resolve_materials_directory
+
+    legacy = tmp_path / "podklady"
+    legacy.mkdir()
+    (legacy / "profil_firmy.md").write_text("LEGACY_ONLY", encoding="utf-8")
+    assert resolve_materials_directory(tmp_path) == legacy
+    current = tmp_path / "materials"
+    current.mkdir()
+    (current / "company_profile.md").write_text("ENGLISH_ONLY", encoding="utf-8")
+    assert resolve_materials_directory(tmp_path) == current
+    text = read_materials(resolve_materials_directory(tmp_path))
+    assert "ENGLISH_ONLY" in text and "LEGACY_ONLY" not in text
+    assert (legacy / "profil_firmy.md").read_text(encoding="utf-8") == "LEGACY_ONLY"
+
+
+def test_missing_materials_resolves_to_new_directory(tmp_path):
+    from refiner.input import resolve_materials_directory
+
+    assert resolve_materials_directory(tmp_path) == tmp_path / "materials"
+
+
+def test_template_precedence_and_exclusion_from_model_text(tmp_path):
+    from refiner.input import find_template
+
+    (tmp_path / "company_profile.md").write_text("Firma Alfa", encoding="utf-8")
+    legacy = tmp_path / "sablona.docx"
+    current = tmp_path / "template.docx"
+    assert find_template(tmp_path) is None
+    legacy.write_bytes(b"legacy template must never be read as model input")
+    assert find_template(tmp_path) == legacy
+    current.write_bytes(b"English template must never be read as model input")
+    assert find_template(tmp_path) == current
+    assert read_materials(tmp_path) == "## Podklad: company_profile.md\n\nFirma Alfa"

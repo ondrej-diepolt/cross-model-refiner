@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from refiner.data import Spotreba as TokenUsage, VystupNalezitosti as RequirementsOutput
-from refiner.konfigurace import nacti_nastaveni as load_settings
+from refiner.configuration import load_settings
 from refiner.kroky import s_opravou as with_repair
 from refiner.models.errors import ModelError
 from refiner.models.claude_cli import ClaudeCliModel, claude_error_kind
@@ -29,7 +29,7 @@ def ok(**changes) -> ProcessResult:
 
 
 def settings():
-    return load_settings(ROOT / "nastaveni.yaml").modely
+    return load_settings(ROOT / "settings.yaml").models
 
 
 class FakeRunner:
@@ -276,8 +276,8 @@ def test_command_from_settings(tmp_path):
     program = tmp_path / "muj-claude.exe"
     program.write_text("")
     n = settings()
-    n = n.model_copy(update={"predplatne": n.predplatne.model_copy(
-        update={"claude": n.predplatne.claude.model_copy(update={"prikaz": str(program)})})})
+    n = n.model_copy(update={"subscription": n.subscription.model_copy(
+        update={"claude": n.subscription.claude.model_copy(update={"command": str(program)})})})
     s = FakeRunner(ok())
     ClaudeCliModel(n, run=s).json("I", "Z", RequirementsOutput, step="k")
     assert s.calls[0].argv[0] == str(program) and s.auth_calls[0].argv[0] == str(program)

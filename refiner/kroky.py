@@ -18,7 +18,7 @@ from refiner.data import (
     VystupNalezitosti,
     sestav_kriteria,
 )
-from refiner.konfigurace import ChybaKonfigurace, Konfigurace
+from refiner.configuration import ConfigurationError, Configuration
 from refiner.models.errors import ModelError, Service
 from refiner.models.interface import Model
 
@@ -39,7 +39,7 @@ ZADANI_NAVRH = "Napiš dokument podle pokynů výše."
 class Zdroje:
     poptavka: str
     podklady: str
-    konfigurace: Konfigurace
+    konfigurace: Configuration
     prompty: Path
 
 
@@ -50,16 +50,16 @@ def vykresli_prompt(slozka: Path, nazev: str, **promenne: str) -> str:
     try:
         text = soubor.read_text(encoding="utf-8")
     except OSError as e:
-        raise ChybaKonfigurace(f"{soubor.name}: prompt nelze přečíst ({e.strerror or e})") from e
+        raise ConfigurationError(f"{soubor.name}: prompt nelze přečíst ({e.strerror or e})") from e
     try:
         return Template(text).substitute(promenne)
     except KeyError as e:
         dostupne = ", ".join(sorted(promenne)) or "žádné"
-        raise ChybaKonfigurace(
+        raise ConfigurationError(
             f"{soubor.name}: neznámá proměnná ${{{e.args[0]}}} (dostupné proměnné: {dostupne})"
         ) from e
     except ValueError as e:
-        raise ChybaKonfigurace(
+        raise ConfigurationError(
             f"{soubor.name}: neplatný zápis proměnné ({e}); znak $ v textu pište jako $$"
         ) from e
 
@@ -290,7 +290,7 @@ def zkontroluj_prepis(stary: str, novy: str, hodnoceni: Hodnoceni, posouzeni: Po
 
 def extrahuj_nalezitosti(model: Model, zdroje: Zdroje) -> tuple[list[Nalezitost], list[str]]:
     instrukce = vykresli_prompt(zdroje.prompty, "nalezitosti", poptavka=zdroje.poptavka)
-    effort = zdroje.konfigurace.nastaveni.modely.claude.effort_extrakce
+    effort = zdroje.konfigurace.settings.models.claude.extraction_effort
     vystup = s_opravou(
         model,
         ZADANI_NALEZITOSTI,
@@ -305,10 +305,10 @@ def napis_navrh(model: Model, zdroje: Zdroje, nalezitosti: list[Nalezitost]) -> 
     konf = zdroje.konfigurace
     instrukce = vykresli_prompt(
         zdroje.prompty, "navrh",
-        typ_dokumentu=konf.profil.typ_dokumentu,
-        pokyny_struktura=konf.profil.pokyny_struktura,
+        typ_dokumentu=konf.profile.document_type,
+        pokyny_struktura=konf.profile.structure_instructions,
         nalezitosti=_text_nalezitosti(nalezitosti),
-        kriteria=text_kriterii(sestav_kriteria(nalezitosti, konf.kriteria_profilu)),
+        kriteria=text_kriterii(sestav_kriteria(nalezitosti, konf.profile_criteria)),
         **spolecne_promenne(zdroje),
     )
     return s_opravou(
@@ -329,10 +329,10 @@ def ohodnot(
     krok: str,
 ) -> tuple[Hodnoceni, list[str]]:
     konf = zdroje.konfigurace
-    max_navrhu = konf.nastaveni.smycka.max_navrhu
+    max_navrhu = konf.settings.loop.max_suggestions
     instrukce = vykresli_prompt(
         zdroje.prompty, "hodnoceni",
-        typ_dokumentu=konf.profil.typ_dokumentu,
+        typ_dokumentu=konf.profile.document_type,
         kriteria=text_kriterii(kriteria),
         max_navrhu=str(max_navrhu),
         odmitnute=_text_odmitnutych(odmitnute),

@@ -5,7 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from refiner.konfigurace import KriteriumProfilu
+from refiner.configuration import ProfileCriterion
 
 
 class Nalezitost(BaseModel):
@@ -26,10 +26,10 @@ class Kriterium(BaseModel):
     skupina: Literal["A", "B"]
 
 
-def sestav_kriteria(nalezitosti: list[Nalezitost], kriteria_profilu: list[KriteriumProfilu]) -> list[Kriterium]:
+def sestav_kriteria(nalezitosti: list[Nalezitost], kriteria_profilu: list[ProfileCriterion]) -> list[Kriterium]:
     """Skupina A z náležitostí (váha 1), pak skupina B z profilu."""
     a = [Kriterium(id=n.id, nazev=n.text, popis=n.citace, vaha=1, skupina="A") for n in nalezitosti]
-    b = [Kriterium(id=k.id, nazev=k.nazev, popis=k.popis, vaha=k.vaha, skupina="B") for k in kriteria_profilu]
+    b = [Kriterium(id=k.id, nazev=k.name, popis=k.description, vaha=k.weight, skupina="B") for k in kriteria_profilu]
     return a + b
 
 

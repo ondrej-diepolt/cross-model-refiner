@@ -11,28 +11,28 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from refiner.beh import SLOZKA_KONFIGURACE, Beh
-from refiner.konfigurace import (
-    ChybaKonfigurace,
-    Konfigurace,
-    cesta_kriterii_k_poptavce,
-    nacti_konfiguraci,
-    nacti_nastaveni,
+from refiner.artifacts import (
+    CONFIGURATION_DIRECTORY, LOG_FILE, MATERIALS_FILE, STATE_FILE, PROMPT_SNAPSHOT_NAMES,
+    canonical_profile_id, output_profile_name,
+)
+from refiner.beh import Beh
+from refiner.configuration import (
+    ConfigurationError,
+    Configuration,
+    criteria_path_for_request,
+    load_configuration,
+    load_settings,
 )
 from refiner.kroky import Zdroje
 from refiner.models.errors import ModelError
 from refiner.models.interface import Model
-from refiner.porovnani import PROMPTY_POROVNANI, porovnej
+from refiner.porovnani import porovnej
 from refiner.smycka import spust_smycku
-from refiner.input import InputError, read_as_markdown, read_materials
+from refiner.input import InputError, read_as_markdown, read_materials, resolve_materials_directory
 from refiner.vystup.docx import exportuj_docx
 from refiner.vystup.prehled import vytvor_prehled
 
 _log = logging.getLogger(__name__)
-
-_PODKLADY = "data/podklady.md"
-_STAV = "data/beh.json"
-_LOG = "data/beh.log"
 
 HLASKA_CTRL_C = "Přerušeno uživatelem (Ctrl+C)."
 HLASKA_NEOCEKAVANA = "Neočekávaná chyba programu – podrobnosti v data/beh.log."
@@ -44,32 +44,32 @@ HLASKA_POROVNAT_ZNOVU = "Stav běhu se nezměnil; porovnání zopakujete spušt�
 
 def _modely_z_repozitare(
     beh: Beh,
-    konfigurace: Konfigurace,
+    konfigurace: Configuration,
     koren: Path,
     hlaseni: Callable[[str], None] | None,
-) -> Konfigurace:
-    """Nahradí oddíly `modely` a `ceny_usd_za_milion` hodnotami z aktuálního koren/nastaveni.yaml.
+) -> Configuration:
+    """Nahradí oddíly `modely` a `ceny_usd_za_milion` hodnotami z aktuálního koren/settings.yaml.
 
     Opravené nastavení modelů (limity tokenů, časový limit, název modelu) se tak projeví
     i v pokračujícím běhu. Smyčka, váhy, profil a prompty zůstávají z kopie běhu, aby skóre
     zůstalo reprodukovatelné. Vadný nebo chybějící soubor v repozitáři → kopie běhu s varováním.
     """
-    soubor = koren / "nastaveni.yaml"
+    soubor = koren / "settings.yaml"
     with _log_behu(beh):
         try:
-            aktualni = nacti_nastaveni(soubor)
-        except ChybaKonfigurace as e:
+            aktualni = load_settings(soubor)
+        except ConfigurationError as e:
             zprava = (f"Varování: nastavení modelů z {soubor} nelze použít ({e}); běh pokračuje "
-                      f"s nastavením modelů z kopie ve složce běhu ({SLOZKA_KONFIGURACE}/nastaveni.yaml).")
+                      f"s nastavením modelů z kopie ve složce běhu ({CONFIGURATION_DIRECTORY}/nastaveni.yaml).")
             _log.warning(zprava)
             if hlaseni is not None:
                 hlaseni(zprava)
             return konfigurace
-        _log.info("Nastavení: oddíly modely a ceny_usd_za_milion z aktuálního %s; smyčka, váhy, "
-                  "profil a prompty z kopie běhu (%s).", soubor, SLOZKA_KONFIGURACE)
-    nastaveni = konfigurace.nastaveni.model_copy(update={
-        "modely": aktualni.modely, "ceny_usd_za_milion": aktualni.ceny_usd_za_milion})
-    return replace(konfigurace, nastaveni=nastaveni)
+        _log.info("Nastavení: oddíly models a prices_usd_per_million z aktuálního %s; smyčka, váhy, "
+                  "profil a prompty z kopie běhu (%s).", soubor, CONFIGURATION_DIRECTORY)
+    nastaveni = konfigurace.settings.model_copy(update={
+        "models": aktualni.models, "prices_usd_per_million": aktualni.prices_usd_per_million})
+    return replace(konfigurace, settings=nastaveni)
 
 
 def _nacti_zdroje(beh: Beh, koren: Path | None = None,
@@ -77,20 +77,21 @@ def _nacti_zdroje(beh: Beh, koren: Path | None = None,
     """Zdroje z kopií ve složce běhu (konfigurace, prompty, poptávka, podklady).
 
     Je-li zadán `koren`, oddíly `modely` a `ceny_usd_za_milion` se vezmou z aktuálního
-    koren/nastaveni.yaml (viz _modely_z_repozitare).
+    koren/settings.yaml (viz _modely_z_repozitare).
     """
-    konf_slozka = beh.slozka / SLOZKA_KONFIGURACE
+    konf_slozka = beh.slozka / CONFIGURATION_DIRECTORY
     kriteria = konf_slozka / "kriteria.yaml"
-    konfigurace = nacti_konfiguraci(
+    konfigurace = load_configuration(
         konf_slozka / "nastaveni.yaml",
         konf_slozka / "profil.yaml",
         kriteria if kriteria.exists() else None,
     )
     # Kopie profilu se jmenuje profil.yaml; název profilu (pro FINALNI_<profil>) je ve stavu běhu.
-    konfigurace = replace(konfigurace, profil_nazev=beh.stav.profil)
+    konfigurace = replace(konfigurace, profile_id=canonical_profile_id(beh.stav.profil),
+                         output_profile_name=beh.stav.profil)
     if koren is not None:
         konfigurace = _modely_z_repozitare(beh, konfigurace, koren, hlaseni)
-    podklady = beh.slozka / _PODKLADY
+    podklady = beh.slozka / MATERIALS_FILE
     return Zdroje(
         poptavka=beh.text("poptavka"),
         podklady=podklady.read_text(encoding="utf-8") if podklady.exists() else "",
@@ -105,34 +106,40 @@ def zahaj_beh(koren: Path, vstup: Path, profil: str, ted: datetime,
 
     `nanecisto` se uloží do stavu běhu (ukázkový běh s falešnými modely).
     """
-    nastaveni = koren / "nastaveni.yaml"
-    soubor_profilu = koren / "profily" / f"{profil}.yaml"
-    kriteria = cesta_kriterii_k_poptavce(vstup)
+    nastaveni = koren / "settings.yaml"
+    profil = canonical_profile_id(profil)
+    soubor_profilu = koren / "profiles" / f"{profil}.yaml"
+    kriteria = criteria_path_for_request(vstup)
     # Chyby konfigurace a vstupu se ohlásí dřív, než vznikne složka běhu.
-    nacti_konfiguraci(nastaveni, soubor_profilu, kriteria)
+    load_configuration(nastaveni, soubor_profilu, kriteria)
     poptavka = read_as_markdown(vstup)
-    podklady = read_materials(koren / "podklady")
+    podklady = read_materials(resolve_materials_directory(koren))
 
-    beh = Beh.novy(koren / "output", vstup.name, profil, ted, nanecisto=nanecisto)
-    konf_slozka = beh.slozka / SLOZKA_KONFIGURACE
+    beh = Beh.novy(koren / "output", vstup.name, output_profile_name(profil), ted, nanecisto=nanecisto)
+    konf_slozka = beh.slozka / CONFIGURATION_DIRECTORY
     konf_slozka.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(nastaveni, konf_slozka / "nastaveni.yaml")
     shutil.copyfile(soubor_profilu, konf_slozka / "profil.yaml")
-    shutil.copytree(koren / "prompty", konf_slozka / "prompty")
+    (konf_slozka / "prompty").mkdir()
+    for name, snapshot_name in PROMPT_SNAPSHOT_NAMES.items():
+        source = koren / "prompty" / f"{name}.md"
+        if not source.is_file():
+            source = koren / "prompty" / snapshot_name
+        shutil.copyfile(source, konf_slozka / "prompty" / snapshot_name)
     if kriteria is not None:
         shutil.copyfile(kriteria, konf_slozka / "kriteria.yaml")
-    beh.zapis_pevny(_PODKLADY, podklady)
+    beh.zapis_pevny(MATERIALS_FILE, podklady)
     beh.zapis("poptavka", "poptavka.md", poptavka)
     return beh, _nacti_zdroje(beh)
 
 
 def _otevri(slozka: Path) -> Beh:
-    if not (slozka / _STAV).is_file():
-        raise InputError(f"Složka {slozka} není složka běhu (chybí {_STAV}).")
+    if not (slozka / STATE_FILE).is_file():
+        raise InputError(f"Složka {slozka} není složka běhu (chybí {STATE_FILE}).")
     try:
         return Beh.otevri(slozka)
     except (OSError, ValidationError) as e:
-        raise InputError(f"Stav běhu ve složce {slozka} nelze přečíst ({_STAV}).") from e
+        raise InputError(f"Stav běhu ve složce {slozka} nelze přečíst ({STATE_FILE}).") from e
 
 
 def obnov_beh(
@@ -144,7 +151,7 @@ def obnov_beh(
     """Otevře přerušený běh; konfiguraci, prompty i vstupy bere z kopií ve složce běhu.
 
     Se zadaným `koren` bere oddíly `modely` a `ceny_usd_za_milion` z aktuálního
-    koren/nastaveni.yaml. Se zadaným `nanecisto` odmítne běh jiného režimu (ukázkový/ostrý).
+    koren/settings.yaml. Se zadaným `nanecisto` odmítne běh jiného režimu (ukázkový/ostrý).
     """
     beh = _otevri(slozka)
     if beh.stav.stav == "dokoncen":
@@ -188,12 +195,16 @@ def obnov_prompty_porovnani(beh: Beh, prompty: Path) -> None:
     dřív, než prompty existovaly), a kopie ve složce běhu pak ukazuje, s čím se porovnávalo.
     Ostatní prompty (hodnoceni.md pro kalibraci) zůstávají z běhu.
     """
-    cil = beh.slozka / SLOZKA_KONFIGURACE / "prompty"
-    for nazev in PROMPTY_POROVNANI:
-        zdroj = prompty / f"{nazev}.md"
-        if zdroj.is_file():
+    cil = beh.slozka / CONFIGURATION_DIRECTORY / "prompty"
+    for name, snapshot_name in PROMPT_SNAPSHOT_NAMES.items():
+        if not name.startswith("comparison_"):
+            continue
+        source = prompty / f"{name}.md"
+        if not source.is_file():
+            source = prompty / snapshot_name
+        if source.is_file():
             cil.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(zdroj, cil / f"{nazev}.md")
+            shutil.copyfile(source, cil / snapshot_name)
 
 
 def najdi_posledni_beh(output: Path, stavy: set[str], nanecisto: bool | None = None) -> Path | None:
@@ -205,7 +216,7 @@ def najdi_posledni_beh(output: Path, stavy: set[str], nanecisto: bool | None = N
         return None
     nalezene: list[tuple[datetime, str, Path]] = []
     for slozka in output.iterdir():
-        if not (slozka / _STAV).is_file():
+        if not (slozka / STATE_FILE).is_file():
             continue
         try:
             stav = Beh.otevri(slozka).stav
@@ -256,7 +267,7 @@ def _dokonci(
     try:
         vysledek = spust_smycku(beh, zdroje, pisatel, hodnotitel, hlaseni)
         finalni = beh.text(f"navrh_{vysledek.finalni_verze}")
-        nazev = zdroje.konfigurace.profil_nazev
+        nazev = zdroje.konfigurace.output_profile_name
         beh.zapis_pevny(f"FINALNI_{nazev}.md", finalni)
         try:
             exportuj_docx(finalni, beh.slozka / f"FINALNI_{nazev}.docx", sablona)
@@ -305,7 +316,7 @@ def dokonci(
 def _log_behu(beh: Beh) -> Iterator[None]:
     """Připojí na logger `refiner` soubor data/beh.log (připisuje se na konec)."""
     logger = logging.getLogger("refiner")
-    handler = logging.FileHandler(beh.slozka / _LOG, encoding="utf-8")
+    handler = logging.FileHandler(beh.slozka / LOG_FILE, encoding="utf-8")
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
     puvodni_uroven = logger.level
     logger.addHandler(handler)
@@ -335,7 +346,7 @@ def porovnej_beh(
         _log.info("Porovnání s referencí %s: start.", nazev_reference or "(bez názvu)")
         try:
             html = porovnej(beh, zdroje, reference_md, hodnotitel, hlaseni, nazev_reference=nazev_reference)
-        except ChybaKonfigurace as e:
+        except ConfigurationError as e:
             hlaseni(str(e))
             return 2
         except ModelError as e:

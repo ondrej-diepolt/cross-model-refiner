@@ -1,5 +1,5 @@
 from refiner.data import Nalezitost, VysledekSkore, sestav_kriteria
-from refiner.konfigurace import KriteriumProfilu
+from refiner.configuration import ProfileCriterion
 from refiner.skore import format_skore, skore_c, spocitej, vyber_finalni
 from tests.pomocne import hodnoceni, kriteria_test, nastaveni_test
 
@@ -70,7 +70,7 @@ def test_format_skore():
 
 def test_sestav_kriteria_poradi_a_skupiny():
     nal = [Nalezitost(id=f"N{i}", text=f"text {i}", citace=f"cit {i}") for i in (1, 2)]
-    prof = [KriteriumProfilu(id="B1", nazev="n", popis="p", vaha=0.4)]
+    prof = [ProfileCriterion(id="B1", name="n", description="p", weight=0.4)]
     k = sestav_kriteria(nal, prof)
     assert [x.id for x in k] == ["N1", "N2", "B1"]
     assert [x.skupina for x in k] == ["A", "A", "B"]

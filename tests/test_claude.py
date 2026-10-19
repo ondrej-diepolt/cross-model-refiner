@@ -6,14 +6,14 @@ import pytest
 from pydantic import BaseModel
 
 from refiner.data import Spotreba as TokenUsage, VystupNalezitosti as RequirementsOutput
-from refiner.konfigurace import NastaveniClaude as ClaudeSettings, NastaveniGpt as GptSettings, NastaveniModelu as ModelSettings
+from refiner.configuration import ClaudeSettings, GptSettings, ModelSettings
 from refiner.models.errors import ModelError
 from refiner.models.claude import ClaudeModel
 
 
 def settings(fallback: bool = True) -> ModelSettings:
     return ModelSettings(
-        claude=ClaudeSettings(model="claude-opus-5-5", effort="high", effort_extrakce="low",
+        claude=ClaudeSettings(model="claude-opus-5-5", effort="high", extraction_effort="low",
                                max_tokens_text=64000, max_tokens_json=16000, fallback=fallback),
         gpt=GptSettings(model="gpt-x", effort="high", max_output_tokens=1000),
         max_retries=2, timeout_s=30.0)

@@ -57,8 +57,8 @@ def spust_smycku(
     hlaseni: Callable[[str], None],
 ) -> VysledekBehu:
     """Provede smyčku; hotové kroky z `beh` načte místo volání modelu. Výjimky nechytá."""
-    nastaveni = zdroje.konfigurace.nastaveni
-    max_revizi = nastaveni.smycka.max_revizi
+    nastaveni = zdroje.konfigurace.settings
+    max_revizi = nastaveni.loop.max_revisions
     celkem_kroku = 2 + 3 * max_revizi + 1
 
     def ohlas(poradi: int, popis: str) -> None:
@@ -78,7 +78,7 @@ def spust_smycku(
         for v in varovani:
             beh.pridej_varovani(v)
         uloz_spotrebu()
-    kriteria = sestav_kriteria(nalezitosti, zdroje.konfigurace.kriteria_profilu)
+    kriteria = sestav_kriteria(nalezitosti, zdroje.konfigurace.profile_criteria)
 
     # Krok 1 – návrh v1
     if beh.hotovo("navrh_1"):

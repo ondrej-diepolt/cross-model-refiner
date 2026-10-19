@@ -4,7 +4,7 @@ from __future__ import annotations
 from decimal import ROUND_HALF_UP, Decimal
 
 from refiner.data import Hodnoceni, Kriterium, VysledekSkore
-from refiner.konfigurace import Nastaveni
+from refiner.configuration import Settings
 
 _DESETINA = Decimal("0.1")
 
@@ -28,7 +28,7 @@ def skore_c(pocet_faktu: int) -> float:
     return float(max(1, 10 - 3 * pocet_faktu))
 
 
-def spocitej(hodnoceni: Hodnoceni, kriteria: list[Kriterium], nastaveni: Nastaveni) -> VysledekSkore:
+def spocitej(hodnoceni: Hodnoceni, kriteria: list[Kriterium], nastaveni: Settings) -> VysledekSkore:
     skore = {s.id: _d(s.skore) for s in hodnoceni.kriteria}
     a_krit = [k for k in kriteria if k.skupina == "A" and k.id in skore]
     b_krit = [k for k in kriteria if k.skupina == "B" and k.id in skore]
@@ -39,14 +39,14 @@ def spocitej(hodnoceni: Hodnoceni, kriteria: list[Kriterium], nastaveni: Nastave
     pocet_faktu = len(hodnoceni.vymyslena_fakta)
     c = _d(skore_c(pocet_faktu))
 
-    v = nastaveni.vahy_skupin
+    v = nastaveni.group_weights
     celkem = _zaokrouhli(_d(v["A"]) * a + _d(v["B"]) * b + _d(v["C"]) * c)
 
     duvody: list[str] = []
-    cil = _d(nastaveni.smycka.cilove_skore)
+    cil = _d(nastaveni.loop.target_score)
     if celkem < cil:
         duvody.append(f"celkové skóre {format_skore(float(celkem))} < {format_skore(float(cil))}")
-    minimum = _d(nastaveni.smycka.min_nalezitost)
+    minimum = _d(nastaveni.loop.min_requirement_score)
     for k in a_krit:
         if skore[k.id] < minimum:
             duvody.append(

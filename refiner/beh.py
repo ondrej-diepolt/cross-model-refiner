@@ -11,8 +11,7 @@ from pydantic import BaseModel
 from refiner.data import Spotreba, VysledekSkore
 from refiner.input import slug
 
-SLOZKA_KONFIGURACE = "data/konfigurace"
-_STAV_SOUBOR = "data/beh.json"
+from refiner.artifacts import STATE_FILE
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -62,11 +61,11 @@ class Beh:
 
     @classmethod
     def otevri(cls, slozka: Path) -> Beh:
-        text = (slozka / _STAV_SOUBOR).read_text(encoding="utf-8")
+        text = (slozka / STATE_FILE).read_text(encoding="utf-8")
         return cls(slozka, StavBehu.model_validate_json(text))
 
     def uloz(self) -> None:
-        cil = self.slozka / _STAV_SOUBOR
+        cil = self.slozka / STATE_FILE
         tmp = cil.with_name(cil.name + ".tmp")
         tmp.write_text(self.stav.model_dump_json(indent=2), encoding="utf-8")
         os.replace(tmp, cil)

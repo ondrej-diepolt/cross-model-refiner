@@ -8,7 +8,7 @@ import pytest
 from openai.lib._pydantic import to_strict_json_schema
 
 from refiner.data import Hodnoceni as Evaluation, Posouzeni as SuggestionReview, Spotreba as TokenUsage, VystupNalezitosti as RequirementsOutput
-from refiner.konfigurace import nacti_nastaveni as load_settings
+from refiner.configuration import load_settings
 from refiner.kroky import s_opravou as with_repair
 from refiner.models.errors import ModelError
 from refiner.models.codex_cli import CodexModel, codex_error_kind, read_events
@@ -38,7 +38,7 @@ def ok_result(stdout=None) -> ProcessResult:
 
 
 def settings():
-    return load_settings(ROOT / "nastaveni.yaml").modely
+    return load_settings(ROOT / "settings.yaml").models
 
 
 class FakeRunner:
