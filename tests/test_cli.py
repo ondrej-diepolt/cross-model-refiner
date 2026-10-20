@@ -13,9 +13,75 @@ from refiner.models.fakes import FakeModel, demo_models
 from tests.helpers import TEST_REQUEST
 
 
+@pytest.mark.parametrize("option", ["--dry-run", "--nanecisto"])
+def test_dry_run_aliases_complete_with_identical_calls(root, option):
+    from tests.helpers import scripted_models
+
+    writer, evaluator = scripted_models([9.5])
+    modes = []
+    def factory(configuration, dry_run):
+        modes.append(dry_run)
+        return writer, evaluator
+    out = io.StringIO()
+    assert main([option], root=root, input_fn=lambda _: "1", output=out, model_factory=factory) == 0
+    run = _only_run(root)
+    assert modes == [True] and run.state.dry_run
+    assert [step for step, *_ in writer.calls] == ["requirements", "draft_1"]
+    assert [step for step, *_ in evaluator.calls] == ["evaluation_1"]
+    assert "Hotovo. Přehled běhu:" in out.getvalue()
+    assert (run.directory / "FINALNI_nabidka.docx").is_file()
+    assert (run.directory / "data/konfigurace/prompty/navrh.md").read_bytes() == (root / "prompts/draft.md").read_bytes()
+
+
+@pytest.mark.parametrize("option", ["--resume", "--pokracovat"])
+def test_resume_aliases_reuse_recorded_steps(root, option):
+    from tests.helpers import make_evaluation
+
+    directory = _interrupted_demo(root)
+    writer = FakeModel({})
+    evaluator = FakeModel({"evaluation_1": [make_evaluation(9.5)]}, name="gpt-fake")
+    out = io.StringIO()
+    assert main(["--nanecisto", option, str(directory)], root=root, input_fn=_forbid_input, output=out,
+                model_factory=lambda configuration, dry_run: (writer, evaluator)) == 0
+    assert writer.calls == [] and [step for step, *_ in evaluator.calls] == ["evaluation_1"]
+    assert Run.open(directory).state.status == "completed"
+
+
+@pytest.mark.parametrize("arguments", [
+    ["--dry-run", "compare"], ["--nanecisto", "compare"],
+    ["--resume", "saved-run", "compare"], ["--pokracovat", "saved-run", "porovnat"],
+])
+def test_compare_rejects_incompatible_options_with_czech_guidance(root, arguments):
+    out = io.StringIO()
+    assert main(arguments, root=root, input_fn=_forbid_input, output=out) == 2
+    assert "nejde kombinovat" in out.getvalue()
+
+
+@pytest.mark.parametrize("profile_id,token", [("proposal", "nabidka"), ("policy", "smernice"), ("custom_offer", "custom_offer")])
+def test_english_cli_profiles_preserve_final_output_tokens(root, profile_id, token):
+    from tests.helpers import TEST_REQUIREMENTS, scripted_responses, make_evaluation
+    from refiner.data import build_criteria
+
+    profiles = root / "profiles"
+    if profile_id == "custom_offer":
+        shutil.copyfile(profiles / "proposal.yaml", profiles / "custom_offer.yaml")
+    for path in profiles.glob("*.yaml"):
+        if path.stem != profile_id:
+            path.unlink()
+    def factory(configuration, dry_run):
+        writer, _ = scripted_responses([9.5])
+        criteria = build_criteria(TEST_REQUIREMENTS, configuration.profile_criteria)
+        return FakeModel(writer), FakeModel({"evaluation_1": [make_evaluation(9.5, criteria=criteria, suggestions=0)]})
+    assert main(["--dry-run"], root=root, input_fn=_forbid_input, output=io.StringIO(), model_factory=factory) == 0
+    run = _only_run(root)
+    assert run.state.profile_id == profile_id and run.state.output_profile_name == token
+    assert (run.directory / f"FINALNI_{token}.docx").is_file()
+    assert f'href="FINALNI_{token}.md"' in (run.directory / "prehled.html").read_text(encoding="utf-8")
+
+
 @pytest.fixture
-def koren(tmp_path, repo_root) -> Path:
-    """Kořen aplikace v tmp (bez .env): settings.yaml, profiles/, prompty/ a input/poptavka.md."""
+def root(tmp_path, repo_root) -> Path:
+    """Temporary app root without .env, including settings, profiles, prompts, and a request."""
     k = tmp_path / "app"
     k.mkdir()
     shutil.copy(repo_root / "settings.yaml", k / "settings.yaml")
@@ -26,73 +92,73 @@ def koren(tmp_path, repo_root) -> Path:
     return k
 
 
-def _odpovedi(*hodnoty: str):
-    fronta = list(hodnoty)
-    return lambda _: fronta.pop(0)
+def _answers(*values: str):
+    queue = list(values)
+    return lambda _: queue.pop(0)
 
 
-def _jediny_beh(koren: Path) -> Run:
-    slozky = list((koren / "output").iterdir())
-    assert len(slozky) == 1
-    return Run.open(slozky[0])
+def _only_run(root: Path) -> Run:
+    directories = list((root / "output").iterdir())
+    assert len(directories) == 1
+    return Run.open(directories[0])
 
 
-class _NecekanyDotaz(BaseException):
-    """BaseException, aby ji nespolkl `except Exception` v cli a test nečekaného dotazu selhal."""
+class _UnexpectedInput(BaseException):
+    """BaseException escapes the CLI catch-all so unexpected input cannot silently pass."""
 
 
-def _nepouzivat(_):
-    raise _NecekanyDotaz("vstup_fn se neměl volat")
+def _forbid_input(_):
+    raise _UnexpectedInput("vstup_fn se neměl volat")
 
 
-# ---------------------------------------------------------------- celý běh
+# ---------------------------------------------------------------- full run
 
-def test_nanecisto_cely_beh(koren):
+def test_dry_run_completes(root):
     out = io.StringIO()
-    assert main(["--nanecisto"], koren=koren, vstup_fn=lambda _: "1", vystup=out) == 0
-    slozka = next((koren / "output").iterdir())
-    assert (slozka / "prehled.html").exists() and (slozka / "FINALNI_nabidka.docx").exists()
+    assert main(["--nanecisto"], root=root, input_fn=lambda _: "1", output=out) == 0
+    directory = next((root / "output").iterdir())
+    assert (directory / "prehled.html").exists() and (directory / "FINALNI_nabidka.docx").exists()
     assert "Hotovo. Přehled běhu:" in out.getvalue()
 
 
-def test_nanecisto_projde_celou_smyckou_s_rostoucim_skore(koren):
-    assert main(["--nanecisto"], koren=koren, vstup_fn=lambda _: "1", vystup=io.StringIO()) == 0
-    beh = _jediny_beh(koren)
-    assert beh.state.status == 'completed'
-    assert [beh.state.scores[str(k)].total for k in range(1, 5)] == [7.9, 8.7, 9.2, 9.6]
-    assert beh.state.stop_reason == 'target_reached'
-    make_review = (beh.directory / "05_posouzeni_1.md").read_text(encoding="utf-8")
-    assert "odmít" in make_review.lower()
-    finalni = (beh.directory / "FINALNI_nabidka.md").read_text(encoding="utf-8")
-    assert "[DOPLNIT:" in finalni
+def test_demo_scores_increase_through_full_loop(root):
+    assert main(["--nanecisto"], root=root, input_fn=lambda _: "1", output=io.StringIO()) == 0
+    run = _only_run(root)
+    assert run.state.status == 'completed'
+    assert [run.state.scores[str(k)].total for k in range(1, 5)] == [7.9, 8.7, 9.2, 9.6]
+    assert run.state.stop_reason == 'target_reached'
+    review = (run.directory / "05_posouzeni_1.md").read_text(encoding="utf-8")
+    assert "odmít" in review.lower()
+    final = (run.directory / "FINALNI_nabidka.md").read_text(encoding="utf-8")
+    assert "[DOPLNIT:" in final
 
 
-def test_nanecisto_poptavka_bez_odrazek(koren):
-    (koren / "input" / "poptavka.md").write_text(
+def test_demo_request_without_bullets(root):
+    (root / "input" / "poptavka.md").write_text(
         "Poptáváme zpracování analýzy rizik.\n\nTermín dodání je do konce roku.\n", encoding="utf-8")
-    assert main(["--nanecisto"], koren=koren, vstup_fn=lambda _: "1", vystup=io.StringIO()) == 0
-    assert _jediny_beh(koren).state.status == 'completed'
+    assert main(["--nanecisto"], root=root, input_fn=lambda _: "1", output=io.StringIO()) == 0
+    assert _only_run(root).state.status == 'completed'
 
 
-def test_demo_modely_nalezitosti_cituji_odrazky_poptavky(sources):
-    pisatel, hodnotitel = demo_models()
-    assert hodnotitel.name.startswith("gpt") and not pisatel.name.startswith("gpt")
-    nalezitosti, varovani = extract_requirements(pisatel, sources)
-    assert varovani == []
-    assert [n.citation for n in nalezitosti] == [
+def test_demo_requirements_cite_request_bullets(sources):
+    writer, evaluator = demo_models()
+    assert evaluator.name.startswith("gpt") and not writer.name.startswith("gpt")
+    requirements, warnings = extract_requirements(writer, sources)
+    assert warnings == []
+    assert [n.citation for n in requirements] == [
         "popis metodiky cvičení", "harmonogram a hlavní milníky realizace", "cenu za celé plnění"]
-    assert [n.id for n in nalezitosti] == ["N1", "N2", "N3"]
+    assert [n.id for n in requirements] == ["N1", "N2", "N3"]
 
 
-def test_hlaseni_neshodi_cp1250_konzoli(koren):
+def test_reporting_handles_cp1250_console(root):
     buf = io.BytesIO()
-    konzole = io.TextIOWrapper(buf, encoding="cp1250", errors="strict")
-    assert main(["--nanecisto"], koren=koren, vstup_fn=lambda _: "1", vystup=konzole) == 0
+    console = io.TextIOWrapper(buf, encoding="cp1250", errors="strict")
+    assert main(["--nanecisto"], root=root, input_fn=lambda _: "1", output=console) == 0
     assert "Hotovo" in buf.getvalue().decode("utf-8", errors="replace")
 
 
-class _NeprekodovatelnyProud(io.StringIO):
-    """Proud bez reconfigure, který neumí znaky mimo cp1250 (jako stará konzole)."""
+class _UnconfigurableStream(io.StringIO):
+    """Stream without reconfigure that only supports cp1250, matching an old console."""
 
     encoding = "cp1250"
 
@@ -101,329 +167,329 @@ class _NeprekodovatelnyProud(io.StringIO):
         return super().write(s)
 
 
-def test_hlaseni_neshodi_proud_bez_reconfigure(koren):
-    out = _NeprekodovatelnyProud()
-    assert main(["--nanecisto"], koren=koren, vstup_fn=lambda _: "1", vystup=out) == 0
+def test_reporting_handles_stream_without_reconfigure(root):
+    out = _UnconfigurableStream()
+    assert main(["--nanecisto"], root=root, input_fn=lambda _: "1", output=out) == 0
     assert "Hotovo" in out.getvalue()
 
 
-# ---------------------------------------------------------------- chyby uživatele a konfigurace
+# ---------------------------------------------------------------- input and configuration errors
 
-def _rezim_api(koren: Path) -> None:
-    nastaveni = koren / "settings.yaml"
-    text = nastaveni.read_text(encoding="utf-8")
+def _api_mode(root: Path) -> None:
+    settings = root / "settings.yaml"
+    text = settings.read_text(encoding="utf-8")
     assert "mode: subscription" in text
-    nastaveni.write_text(text.replace("mode: subscription", "mode: api"), encoding="utf-8")
+    settings.write_text(text.replace("mode: subscription", "mode: api"), encoding="utf-8")
 
 
-def test_chybejici_klic(koren):
-    _rezim_api(koren)
+def test_missing_api_key(root):
+    _api_mode(root)
     out = io.StringIO()
-    assert main([], koren=koren, vstup_fn=_nepouzivat, vystup=out) == 2
+    assert main([], root=root, input_fn=_forbid_input, output=out) == 2
     assert "ANTHROPIC_API_KEY" in out.getvalue() and ".env.example" in out.getvalue()
-    assert not (koren / "output").exists() or not any((koren / "output").iterdir())
+    assert not (root / "output").exists() or not any((root / "output").iterdir())
 
 
-def test_chybejici_klic_openai(koren, monkeypatch):
-    _rezim_api(koren)
+def test_missing_openai_key(root, monkeypatch):
+    _api_mode(root)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-klic")
     out = io.StringIO()
-    assert main([], koren=koren, vstup_fn=_nepouzivat, vystup=out) == 2
+    assert main([], root=root, input_fn=_forbid_input, output=out) == 2
     assert "OPENAI_API_KEY" in out.getvalue() and "ANTHROPIC_API_KEY" not in out.getvalue()
 
 
-def test_klic_z_env_souboru(koren):
-    _rezim_api(koren)
-    (koren / ".env").write_text("ANTHROPIC_API_KEY=a\nOPENAI_API_KEY=b\n", encoding="utf-8")
-    pouzite = []
+def test_key_from_env_file(root):
+    _api_mode(root)
+    (root / ".env").write_text("ANTHROPIC_API_KEY=a\nOPENAI_API_KEY=b\n", encoding="utf-8")
+    used = []
 
-    def tovarna(konf, nanecisto):
-        pouzite.append(nanecisto)
+    def model_factory(configuration, dry_run):
+        used.append(dry_run)
         return demo_models()
 
     out = io.StringIO()
     try:
-        assert main([], koren=koren, vstup_fn=lambda _: "1", vystup=out, tovarna_modelu=tovarna) == 0
-    finally:   # load_dotenv zapsal klíče do os.environ – neprosakovat do dalších testů
+        assert main([], root=root, input_fn=lambda _: "1", output=out, model_factory=model_factory) == 0
+    finally:   # Prevent dotenv test credentials leaking into later tests.
         os.environ.pop("ANTHROPIC_API_KEY", None)
         os.environ.pop("OPENAI_API_KEY", None)
-    assert pouzite == [False]
+    assert used == [False]
 
 
-def test_predplatne_nekontroluje_klice(koren):
+def test_subscription_does_not_require_keys(root):
     out = io.StringIO()
-    assert main([], koren=koren, vstup_fn=lambda _: "1", vystup=out,
-                tovarna_modelu=lambda konf, nanecisto: demo_models()) == 0
+    assert main([], root=root, input_fn=lambda _: "1", output=out,
+                model_factory=lambda configuration, dry_run: demo_models()) == 0
     assert "ANTHROPIC_API_KEY" not in out.getvalue() and "OPENAI_API_KEY" not in out.getvalue()
 
 
-def test_porovnat_v_rezimu_api_kontroluje_jen_openai(koren):
-    _rezim_api(koren)
+def test_compare_api_mode_checks_only_openai_key(root):
+    _api_mode(root)
     out = io.StringIO()
-    assert main(["porovnat"], koren=koren, vstup_fn=_nepouzivat, vystup=out) == 2
+    assert main(["porovnat"], root=root, input_fn=_forbid_input, output=out) == 2
     assert "OPENAI_API_KEY" in out.getvalue() and "ANTHROPIC_API_KEY" not in out.getvalue()
 
 
-def _konfigurace_s_rezimem(sources, rezim):
-    nastaveni = sources.configuration.settings
-    modely = nastaveni.models.model_copy(update={"mode": rezim})
+def _configuration_with_mode(sources, mode):
+    settings = sources.configuration.settings
+    models = settings.models.model_copy(update={"mode": mode})
     return sources.configuration.__class__(
-        nastaveni.model_copy(update={"models": modely}), sources.configuration.profile,
+        settings.model_copy(update={"models": models}), sources.configuration.profile,
         sources.configuration.profile_id, sources.configuration.profile_criteria, sources.configuration.output_profile_name)
 
 
-def test_vychozi_tovarna_podle_rezimu(sources, monkeypatch):
+def test_default_factory_uses_selected_mode(sources, monkeypatch):
     import refiner.cli as cli
 
-    for nazev in ("ClaudeCliModel", "CodexModel", "ClaudeModel", "GptModel"):
-        monkeypatch.setattr(cli, nazev, type(nazev, (), {"__init__": lambda self, *a, **k: None}))
+    for name in ("ClaudeCliModel", "CodexModel", "ClaudeModel", "GptModel"):
+        monkeypatch.setattr(cli, name, type(name, (), {"__init__": lambda self, *a, **k: None}))
 
-    def typy(dvojice):
-        return tuple(type(m).__name__ for m in dvojice)
+    def types(pair):
+        return tuple(type(m).__name__ for m in pair)
 
-    predplatne = _konfigurace_s_rezimem(sources, "subscription")
-    api = _konfigurace_s_rezimem(sources, "api")
-    assert typy(cli._vychozi_tovarna(predplatne, False)) == ("ClaudeCliModel", "CodexModel")
-    assert typy(cli._vychozi_tovarna(api, False)) == ("ClaudeModel", "GptModel")
-    assert type(cli._vychozi_hodnotitel(predplatne)).__name__ == "CodexModel"
-    assert type(cli._vychozi_hodnotitel(api)).__name__ == "GptModel"
-    assert cli._vychozi_tovarna(predplatne, True)[1].name.startswith("gpt")   # demo modely
+    subscription = _configuration_with_mode(sources, "subscription")
+    api = _configuration_with_mode(sources, "api")
+    assert types(cli._default_model_factory(subscription, False)) == ("ClaudeCliModel", "CodexModel")
+    assert types(cli._default_model_factory(api, False)) == ("ClaudeModel", "GptModel")
+    assert type(cli._default_evaluator(subscription)).__name__ == "CodexModel"
+    assert type(cli._default_evaluator(api)).__name__ == "GptModel"
+    assert cli._default_model_factory(subscription, True)[1].name.startswith("gpt")   # demo models
 
 
-def test_predplatne_nepripraveny_nastroj_je_kod_2(koren, monkeypatch):
+def test_unavailable_subscription_tool_returns_2(root, monkeypatch):
     monkeypatch.setattr("shutil.which", lambda _: None)
     out = io.StringIO()
-    assert main([], koren=koren, vstup_fn=lambda _: "1", vystup=out) == 2
+    assert main([], root=root, input_fn=lambda _: "1", output=out) == 2
     assert "příkaz claude nebyl nalezen" in out.getvalue()
-    assert not (koren / "output").exists() or not any((koren / "output").iterdir())
+    assert not (root / "output").exists() or not any((root / "output").iterdir())
 
 
-def test_neplatny_rezim_je_kod_2(koren):
-    nastaveni = koren / "settings.yaml"
-    nastaveni.write_text(nastaveni.read_text(encoding="utf-8").replace("mode: subscription", "mode: xyz"),
+def test_invalid_mode_returns_2(root):
+    settings = root / "settings.yaml"
+    settings.write_text(settings.read_text(encoding="utf-8").replace("mode: subscription", "mode: xyz"),
                          encoding="utf-8")
     out = io.StringIO()
-    assert main([], koren=koren, vstup_fn=_nepouzivat, vystup=out) == 2
+    assert main([], root=root, input_fn=_forbid_input, output=out) == 2
     assert "models.mode" in out.getvalue()
-    assert not (koren / "output").exists() or not any((koren / "output").iterdir())
+    assert not (root / "output").exists() or not any((root / "output").iterdir())
 
 
-def test_nanecisto_nenacita_nastaveni_a_nepotrebuje_nastroje(koren, monkeypatch):
+def test_demo_needs_no_provider_tools(root, monkeypatch):
     monkeypatch.setattr("shutil.which", lambda _: None)
-    assert main(["--nanecisto"], koren=koren, vstup_fn=lambda _: "1", vystup=io.StringIO()) == 0
+    assert main(["--nanecisto"], root=root, input_fn=lambda _: "1", output=io.StringIO()) == 0
 
 
-@pytest.mark.parametrize("kodovani", ["cp1250", "utf-16"])
-def test_env_v_jinem_kodovani_je_kod_2(koren, kodovani):
-    (koren / ".env").write_text("# Klíče k API\nANTHROPIC_API_KEY=a\nOPENAI_API_KEY=b\n",
-                                encoding=kodovani)
+@pytest.mark.parametrize("encoding", ["cp1250", "utf-16"])
+def test_env_invalid_encoding_returns_2(root, encoding):
+    (root / ".env").write_text("# Klíče k API\nANTHROPIC_API_KEY=a\nOPENAI_API_KEY=b\n",
+                                encoding=encoding)
     out = io.StringIO()
     try:
-        assert main([], koren=koren, vstup_fn=_nepouzivat, vystup=out) == 2
+        assert main([], root=root, input_fn=_forbid_input, output=out) == 2
     finally:
         os.environ.pop("ANTHROPIC_API_KEY", None)
         os.environ.pop("OPENAI_API_KEY", None)
     assert "Soubor .env nelze přečíst" in out.getvalue() and "UTF-8" in out.getvalue()
-    assert not (koren / "output").exists()
+    assert not (root / "output").exists()
 
 
-def test_nepouzivat_neni_spolknuto(koren):
-    """Pojistka testů: nečekaný dotaz na vstup se nesmí ztratit v obecném zachycení chyb."""
-    (koren / "input" / "druha.md").write_text(TEST_REQUEST, encoding="utf-8")
-    with pytest.raises(_NecekanyDotaz):
-        main(["--nanecisto"], koren=koren, vstup_fn=_nepouzivat, vystup=io.StringIO())
+def test_unexpected_input_is_not_swallowed(root):
+    """An unexpected input prompt must escape the general exception handler."""
+    (root / "input" / "druha.md").write_text(TEST_REQUEST, encoding="utf-8")
+    with pytest.raises(_UnexpectedInput):
+        main(["--nanecisto"], root=root, input_fn=_forbid_input, output=io.StringIO())
 
 
-def test_prazdny_input(koren):
-    (koren / "input" / "poptavka.md").unlink()
+def test_empty_input_directory(root):
+    (root / "input" / "poptavka.md").unlink()
     out = io.StringIO()
-    assert main(["--nanecisto"], koren=koren, vstup_fn=_nepouzivat, vystup=out) == 2
+    assert main(["--nanecisto"], root=root, input_fn=_forbid_input, output=out) == 2
     assert "Ve složce input/ není žádná poptávka (DOCX, MD nebo TXT)." in out.getvalue()
 
 
-def test_vyber_z_vice_souboru(koren):
-    (koren / "input" / "poptavka.md").rename(koren / "input" / "a_jina.md")
-    (koren / "input" / "a_jina.md").write_text("# Jiná\n\n- jiný požadavek\n", encoding="utf-8")
-    (koren / "input" / "b_poptavka.md").write_text(TEST_REQUEST, encoding="utf-8")
+def test_select_from_multiple_inputs(root):
+    (root / "input" / "poptavka.md").rename(root / "input" / "a_jina.md")
+    (root / "input" / "a_jina.md").write_text("# Jiná\n\n- jiný požadavek\n", encoding="utf-8")
+    (root / "input" / "b_poptavka.md").write_text(TEST_REQUEST, encoding="utf-8")
     out = io.StringIO()
-    # "9" je neplatná volba souboru → zopakuje se; "2" = b_poptavka.md; "1" = profil Nabídka.
-    assert main(["--nanecisto"], koren=koren, vstup_fn=_odpovedi("9", "2", "1"), vystup=out) == 0
-    assert _jediny_beh(koren).state.input == "b_poptavka.md"
+    # Retry invalid 9; select file 2 (b_poptavka.md), then profile 1 (proposal).
+    assert main(["--nanecisto"], root=root, input_fn=_answers("9", "2", "1"), output=out) == 0
+    assert _only_run(root).state.input == "b_poptavka.md"
     assert "1) a_jina.md" in out.getvalue() and "2) b_poptavka.md" in out.getvalue()
     assert "Neplatná volba" in out.getvalue()
 
 
-def test_vyber_profilu(koren):
+def test_profile_selection(root):
     out = io.StringIO()
-    assert main(["--nanecisto"], koren=koren, vstup_fn=lambda _: "2", vystup=out) == 0
-    beh = _jediny_beh(koren)
-    assert beh.state.output_profile_name == "smernice"
+    assert main(["--nanecisto"], root=root, input_fn=lambda _: "2", output=out) == 0
+    run = _only_run(root)
+    assert run.state.output_profile_name == "smernice"
     assert "Nabídka, nebo směrnice?" in out.getvalue()
-    assert (beh.directory / "FINALNI_smernice.docx").exists()
+    assert (run.directory / "FINALNI_smernice.docx").exists()
 
 
-def test_jeden_profil_se_nepta(koren):
-    (koren / "profiles" / "policy.yaml").unlink()
-    assert main(["--nanecisto"], koren=koren, vstup_fn=_nepouzivat, vystup=io.StringIO()) == 0
-    assert _jediny_beh(koren).state.output_profile_name == "nabidka"
+def test_single_profile_needs_no_selection(root):
+    (root / "profiles" / "policy.yaml").unlink()
+    assert main(["--nanecisto"], root=root, input_fn=_forbid_input, output=io.StringIO()) == 0
+    assert _only_run(root).state.output_profile_name == "nabidka"
 
 
-def test_konec_vstupu_pri_vyberu_je_kod_2(koren):
+def test_eof_during_selection_returns_2(root):
     def eof(_):
         raise EOFError
 
     out = io.StringIO()
-    assert main(["--nanecisto"], koren=koren, vstup_fn=eof, vystup=out) == 2
-    assert not (koren / "output").exists()
+    assert main(["--nanecisto"], root=root, input_fn=eof, output=out) == 2
+    assert not (root / "output").exists()
 
 
-def test_chyba_konfigurace_je_kod_2(koren):
-    (koren / "settings.yaml").write_text("loop: [\n", encoding="utf-8")
+def test_configuration_error_returns_2(root):
+    (root / "settings.yaml").write_text("loop: [\n", encoding="utf-8")
     out = io.StringIO()
-    assert main(["--nanecisto"], koren=koren, vstup_fn=lambda _: "1", vystup=out) == 2
+    assert main(["--nanecisto"], root=root, input_fn=lambda _: "1", output=out) == 2
     assert "settings.yaml" in out.getvalue()
-    assert not (koren / "output").exists()
+    assert not (root / "output").exists()
 
 
-def test_prazdna_poptavka_je_kod_2(koren):
-    (koren / "input" / "poptavka.md").write_text("  \n", encoding="utf-8")
+def test_empty_request_returns_2(root):
+    (root / "input" / "poptavka.md").write_text("  \n", encoding="utf-8")
     out = io.StringIO()
-    assert main(["--nanecisto"], koren=koren, vstup_fn=lambda _: "1", vystup=out) == 2
+    assert main(["--nanecisto"], root=root, input_fn=lambda _: "1", output=out) == 2
     assert "neobsahuje žádný text" in out.getvalue()
 
 
-# ---------------------------------------------------------------- pokračování
+# ---------------------------------------------------------------- resume
 
-def _tovarna_selze_v_hodnoceni_1(konf, nanecisto):
-    pisatel, _ = demo_models()
-    return pisatel, FakeModel({'evaluation_1': [ModelError('network', "OpenAI")]}, name="gpt-falesny")
+def _factory_fails_evaluation_1(configuration, dry_run):
+    writer, _ = demo_models()
+    return writer, FakeModel({'evaluation_1': [ModelError('network', "OpenAI")]}, name="gpt-falesny")
 
 
-def test_pokracovat_bez_hodnoty_najde_posledni(koren, monkeypatch):
+def test_resume_without_value_finds_latest(root, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-klic")
     monkeypatch.setenv("OPENAI_API_KEY", "test-klic")
     out = io.StringIO()
-    assert main([], koren=koren, vstup_fn=lambda _: "1", vystup=out,
-                tovarna_modelu=_tovarna_selze_v_hodnoceni_1) == 1
-    assert "pokracovat.bat" in out.getvalue()
-    assert _jediny_beh(koren).state.status == 'interrupted'
+    assert main([], root=root, input_fn=lambda _: "1", output=out,
+                model_factory=_factory_fails_evaluation_1) == 1
+    assert "resume.bat" in out.getvalue()
+    assert _only_run(root).state.status == 'interrupted'
 
-    modely = []
+    models = []
 
-    def tovarna(konf, nanecisto):
-        modely.append(demo_models())
-        return modely[-1]
+    def model_factory(configuration, dry_run):
+        models.append(demo_models())
+        return models[-1]
 
-    assert main(["--pokracovat"], koren=koren, vstup_fn=_nepouzivat, vystup=io.StringIO(),
-                tovarna_modelu=tovarna) == 0
-    beh = _jediny_beh(koren)
-    assert beh.state.status == 'completed'
-    pisatel = modely[0][0]
-    assert 'requirements' not in [krok for krok, _, _ in pisatel.calls]
-
-
-def test_pokracovat_se_slozkou(koren):
-    assert main(["--nanecisto"], koren=koren, vstup_fn=lambda _: "1", vystup=io.StringIO(),
-                tovarna_modelu=_tovarna_selze_v_hodnoceni_1) == 1
-    slozka = next((koren / "output").iterdir())
-    assert main(["--nanecisto", "--pokracovat", slozka.name], koren=koren, vstup_fn=_nepouzivat,
-                vystup=io.StringIO()) == 0
-    assert Run.open(slozka).state.status == 'completed'
+    assert main(['--resume'], root=root, input_fn=_forbid_input, output=io.StringIO(),
+                model_factory=model_factory) == 0
+    run = _only_run(root)
+    assert run.state.status == 'completed'
+    writer = models[0][0]
+    assert 'requirements' not in [step for step, _, _ in writer.calls]
 
 
-def test_pokracovat_bez_preruseneho_behu(koren):
+def test_resume_explicit_directory(root):
+    assert main(["--nanecisto"], root=root, input_fn=lambda _: "1", output=io.StringIO(),
+                model_factory=_factory_fails_evaluation_1) == 1
+    directory = next((root / "output").iterdir())
+    assert main(["--nanecisto", '--resume', directory.name], root=root, input_fn=_forbid_input,
+                output=io.StringIO()) == 0
+    assert Run.open(directory).state.status == 'completed'
+
+
+def test_resume_no_interrupted_run(root):
     out = io.StringIO()
-    assert main(["--nanecisto", "--pokracovat"], koren=koren, vstup_fn=_nepouzivat, vystup=out) == 2
+    assert main(["--nanecisto", '--resume'], root=root, input_fn=_forbid_input, output=out) == 2
     assert "output" in out.getvalue()
 
 
-def test_pokracovat_dokonceny_beh_je_kod_2(koren):
-    assert main(["--nanecisto"], koren=koren, vstup_fn=lambda _: "1", vystup=io.StringIO()) == 0
-    slozka = next((koren / "output").iterdir())
+def test_resume_completed_run_returns_2(root):
+    assert main(["--nanecisto"], root=root, input_fn=lambda _: "1", output=io.StringIO()) == 0
+    directory = next((root / "output").iterdir())
     out = io.StringIO()
-    assert main(["--nanecisto", "--pokracovat", str(slozka)], koren=koren, vstup_fn=_nepouzivat,
-                vystup=out) == 2
+    assert main(["--nanecisto", '--resume', str(directory)], root=root, input_fn=_forbid_input,
+                output=out) == 2
     assert "dokončený" in out.getvalue()
 
 
-# ---------------------------------------------------------------- ukázkový vs. ostrý běh
+# ---------------------------------------------------------------- demo versus live run
 
-def _preruseny_ostry(koren: Path, monkeypatch) -> Path:
+def _interrupted_live(root: Path, monkeypatch) -> Path:
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-klic")
     monkeypatch.setenv("OPENAI_API_KEY", "test-klic")
-    assert main([], koren=koren, vstup_fn=lambda _: "1", vystup=io.StringIO(),
-                tovarna_modelu=_tovarna_selze_v_hodnoceni_1) == 1
-    return max((koren / "output").iterdir(), key=lambda p: Run.open(p).state.created_at)
+    assert main([], root=root, input_fn=lambda _: "1", output=io.StringIO(),
+                model_factory=_factory_fails_evaluation_1) == 1
+    return max((root / "output").iterdir(), key=lambda p: Run.open(p).state.created_at)
 
 
-def _preruseny_ukazkovy(koren: Path) -> Path:
-    assert main(["--nanecisto"], koren=koren, vstup_fn=lambda _: "1", vystup=io.StringIO(),
-                tovarna_modelu=_tovarna_selze_v_hodnoceni_1) == 1
-    return max((koren / "output").iterdir(), key=lambda p: Run.open(p).state.created_at)
+def _interrupted_demo(root: Path) -> Path:
+    assert main(["--nanecisto"], root=root, input_fn=lambda _: "1", output=io.StringIO(),
+                model_factory=_factory_fails_evaluation_1) == 1
+    return max((root / "output").iterdir(), key=lambda p: Run.open(p).state.created_at)
 
 
-def test_rezim_behu_se_ulozi(koren, monkeypatch):
-    assert Run.open(_preruseny_ukazkovy(koren)).state.dry_run is True
-    assert Run.open(_preruseny_ostry(koren, monkeypatch)).state.dry_run is False
+def test_run_mode_is_saved(root, monkeypatch):
+    assert Run.open(_interrupted_demo(root)).state.dry_run is True
+    assert Run.open(_interrupted_live(root, monkeypatch)).state.dry_run is False
 
 
-def test_pokracovat_ostre_v_ukazkovem_behu_je_kod_2(koren, monkeypatch):
-    slozka = _preruseny_ukazkovy(koren)
+def test_live_resume_of_demo_returns_2(root, monkeypatch):
+    directory = _interrupted_demo(root)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-klic")
     monkeypatch.setenv("OPENAI_API_KEY", "test-klic")
     out = io.StringIO()
-    assert main(["--pokracovat", slozka.name], koren=koren, vstup_fn=_nepouzivat, vystup=out,
-                tovarna_modelu=lambda konf, n: demo_models()) == 2
-    assert "ukázkový" in out.getvalue() and "--nanecisto" in out.getvalue()
-    assert Run.open(slozka).state.status == 'interrupted'
+    assert main(['--resume', directory.name], root=root, input_fn=_forbid_input, output=out,
+                model_factory=lambda configuration, n: demo_models()) == 2
+    assert "ukázkový" in out.getvalue() and "--dry-run" in out.getvalue()
+    assert Run.open(directory).state.status == 'interrupted'
 
 
-def test_pokracovat_nanecisto_v_ostrem_behu_je_kod_2(koren, monkeypatch):
-    slozka = _preruseny_ostry(koren, monkeypatch)
+def test_demo_resume_of_live_run_returns_2(root, monkeypatch):
+    directory = _interrupted_live(root, monkeypatch)
     out = io.StringIO()
-    assert main(["--nanecisto", "--pokracovat", str(slozka)], koren=koren, vstup_fn=_nepouzivat,
-                vystup=out) == 2
+    assert main(["--nanecisto", '--resume', str(directory)], root=root, input_fn=_forbid_input,
+                output=out) == 2
     assert "ostrý" in out.getvalue()
-    assert Run.open(slozka).state.status == 'interrupted'
+    assert Run.open(directory).state.status == 'interrupted'
 
 
-def test_pokracovat_bez_hodnoty_preskoci_beh_jineho_rezimu(koren, monkeypatch):
-    ostry = _preruseny_ostry(koren, monkeypatch)
-    ukazkovy = _preruseny_ukazkovy(koren)   # novější
-    assert main(["--pokracovat"], koren=koren, vstup_fn=_nepouzivat, vystup=io.StringIO(),
-                tovarna_modelu=lambda konf, n: demo_models()) == 0
-    assert Run.open(ostry).state.status == 'completed'
-    assert Run.open(ukazkovy).state.status == 'interrupted'
-    assert main(["--nanecisto", "--pokracovat"], koren=koren, vstup_fn=_nepouzivat,
-                vystup=io.StringIO()) == 0
-    assert Run.open(ukazkovy).state.status == 'completed'
+def test_resume_latest_skips_other_mode(root, monkeypatch):
+    live = _interrupted_live(root, monkeypatch)
+    demo = _interrupted_demo(root)   # newer
+    assert main(['--resume'], root=root, input_fn=_forbid_input, output=io.StringIO(),
+                model_factory=lambda configuration, n: demo_models()) == 0
+    assert Run.open(live).state.status == 'completed'
+    assert Run.open(demo).state.status == 'interrupted'
+    assert main(["--nanecisto", '--resume'], root=root, input_fn=_forbid_input,
+                output=io.StringIO()) == 0
+    assert Run.open(demo).state.status == 'completed'
 
 
-def test_pokracovat_bez_hodnoty_jen_beh_jineho_rezimu_je_kod_2(koren):
-    _preruseny_ukazkovy(koren)
+def test_resume_only_other_mode_returns_2(root):
+    _interrupted_demo(root)
     os.environ["ANTHROPIC_API_KEY"] = os.environ["OPENAI_API_KEY"] = "test-klic"
     out = io.StringIO()
     try:
-        assert main(["--pokracovat"], koren=koren, vstup_fn=_nepouzivat, vystup=out,
-                    tovarna_modelu=lambda konf, n: demo_models()) == 2
+        assert main(['--resume'], root=root, input_fn=_forbid_input, output=out,
+                    model_factory=lambda configuration, n: demo_models()) == 2
     finally:
         os.environ.pop("ANTHROPIC_API_KEY", None)
         os.environ.pop("OPENAI_API_KEY", None)
-    assert "přerušený" in out.getvalue() and "--nanecisto" in out.getvalue()
+    assert "přerušený" in out.getvalue() and "--dry-run" in out.getvalue()
 
 
-def test_pokracovat_bere_modely_z_aktualniho_nastaveni(koren, monkeypatch):
-    slozka = _preruseny_ostry(koren, monkeypatch)
-    nastaveni = koren / "settings.yaml"
-    nastaveni.write_text(nastaveni.read_text(encoding="utf-8")
+def test_resume_uses_current_model_settings(root, monkeypatch):
+    directory = _interrupted_live(root, monkeypatch)
+    settings = root / "settings.yaml"
+    settings.write_text(settings.read_text(encoding="utf-8")
                          .replace("max_output_tokens: 64000", "max_output_tokens: 99000"), encoding="utf-8")
-    konfigurace = []
+    configurations = []
 
-    def tovarna(konf, n):
-        konfigurace.append(konf)
+    def model_factory(configuration, n):
+        configurations.append(configuration)
         return demo_models()
 
-    assert main(["--pokracovat"], koren=koren, vstup_fn=_nepouzivat, vystup=io.StringIO(),
-                tovarna_modelu=tovarna) == 0
-    assert konfigurace[0].settings.models.gpt.max_output_tokens == 99000
-    assert "prices_usd_per_million" in (slozka / "data" / "beh.log").read_text(encoding="utf-8")
+    assert main(['--resume'], root=root, input_fn=_forbid_input, output=io.StringIO(),
+                model_factory=model_factory) == 0
+    assert configurations[0].settings.models.gpt.max_output_tokens == 99000
+    assert "prices_usd_per_million" in (directory / "data" / "beh.log").read_text(encoding="utf-8")

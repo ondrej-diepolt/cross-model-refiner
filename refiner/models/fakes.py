@@ -56,11 +56,11 @@ class FakeModel:
         return usage
 
 
-# ---------------------------------------------------------------- demo mode (--nanecisto)
+# ---------------------------------------------------------------- demo mode (--dry-run)
 
 DEMO_SCORES = (7.5, 8.5, 9.0, 9.5)   # all criterion scores in evaluations 1, 2, 3, 4 (and later)
 _DEMO_STOCK = 50                    # responses per step, with room for retries and higher revision limits
-_DEMO_NOTE = "Ukázka režimu --nanecisto (falešné modely, bez volání API a bez nákladů)."
+_DEMO_NOTE = "Ukázka režimu --dry-run (falešné modely, bez volání API a bez nákladů)."
 _DEMO_DECISIONS = ('accepted', 'partial', 'rejected')
 _DEMO_PRIORITY = ('high', 'medium', 'low')
 
@@ -147,7 +147,7 @@ def _demo_evaluation(score: float) -> Callable[[str, str], dict]:
                          for i in ids],
             'fabricated_facts': [],
             'claims_to_verify': [{'citation': "v souladu s GDPR",
-                                   'reason': "Ukázka položky k ověření – v režimu --nanecisto se nic neověřuje."}],
+                                   'reason': "Ukázka položky k ověření – v režimu --dry-run se nic neověřuje."}],
             'suggestions': suggestions,
             'overall_comment': f"{_DEMO_NOTE} Všechna kritéria mají skóre {_number(score)}.",
         }

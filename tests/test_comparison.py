@@ -31,9 +31,9 @@ from tests.helpers import TEST_REQUEST, make_run, make_evaluation, make_criteria
 
 def test_legacy_comparison_preserves_filled_form_and_czech_labels(legacy_completed):
     import re
-    from refiner.aplikace import otevri_dokonceny
+    from refiner.application import open_completed_run
 
-    run, sources = otevri_dokonceny(legacy_completed)
+    run, sources = open_completed_run(legacy_completed)
     form = legacy_completed / "porovnani_formular.md"
     before = form.read_bytes()
     state_before = run.state.model_dump(exclude={"usage"})
@@ -53,14 +53,14 @@ def test_legacy_comparison_preserves_filled_form_and_czech_labels(legacy_complet
 
 
 def test_comparison_refresh_preserves_saved_evaluation(legacy_completed, repo_root):
-    from refiner.aplikace import obnov_prompty_porovnani, otevri_dokonceny
+    from refiner.application import refresh_comparison_prompts, open_completed_run
 
-    run, sources = otevri_dokonceny(legacy_completed)
+    run, sources = open_completed_run(legacy_completed)
     snapshot = run.directory / "data/konfigurace/prompty"
     saved = {p.name: p.read_bytes() for p in snapshot.glob("*.md")}
     form_before = (run.directory / "porovnani_formular.md").read_bytes()
     old_usage = len(run.state.usage)
-    obnov_prompty_porovnani(run, repo_root / "prompts")
+    refresh_comparison_prompts(run, repo_root / "prompts")
     for source, destination in (
         ("comparison_criteria.md", "porovnani_kriteria.md"),
         ("comparison_elements.md", "porovnani_prvky.md"),
@@ -83,9 +83,9 @@ def test_comparison_refresh_preserves_saved_evaluation(legacy_completed, repo_ro
 @pytest.mark.parametrize("profile_id,token", [("policy", "smernice"), ("custom_offer", "custom_offer")])
 def test_comparison_links_preserve_output_profile_tokens(legacy_completed, profile_id, token):
     from dataclasses import replace
-    from refiner.aplikace import otevri_dokonceny
+    from refiner.application import open_completed_run
 
-    run, sources = otevri_dokonceny(legacy_completed)
+    run, sources = open_completed_run(legacy_completed)
     configuration = replace(sources.configuration, profile_id=profile_id, output_profile_name=token)
     sources = replace(sources, configuration=configuration)
     run.write_fixed(f"FINALNI_{token}.md", "# Dokument\n")
@@ -400,8 +400,8 @@ def _completed_run_cli(app_root: Path, dry_run: bool = False) -> tuple[Path, Fak
     if not dry_run:
         os.environ["ANTHROPIC_API_KEY"] = os.environ["OPENAI_API_KEY"] = "test-klic"
     try:
-        assert main(argv, koren=app_root, vstup_fn=lambda _: "1", vystup=io.StringIO(),
-                    tovarna_modelu=lambda configuration, n: models) == 0
+        assert main(argv, root=app_root, input_fn=lambda _: "1", output=io.StringIO(),
+                    model_factory=lambda configuration, n: models) == 0
     finally:
         if not dry_run:
             os.environ.pop("ANTHROPIC_API_KEY", None)
@@ -416,8 +416,8 @@ def test_cli_compare_rejects_demo_run(app_root, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-klic")
     evaluator = _evaluator()
     out = io.StringIO()
-    assert main(["porovnat", directory.name], koren=app_root, vystup=out,
-                tovarna_modelu=lambda configuration, n: (FakeModel({}), evaluator)) == 2
+    assert main(["porovnat", directory.name], root=app_root, output=out,
+                model_factory=lambda configuration, n: (FakeModel({}), evaluator)) == 2
     assert "ukázkový" in out.getvalue() and evaluator.calls == []
     assert not (directory / "porovnani.html").exists()
 
@@ -426,8 +426,8 @@ def test_cli_compare_latest_skips_demo_runs(app_root, monkeypatch):
     live, _ = _completed_run_cli(app_root)
     demo, _ = _completed_run_cli(app_root, dry_run=True)   # newer
     monkeypatch.setenv("OPENAI_API_KEY", "test-klic")
-    assert main(["porovnat"], koren=app_root, vystup=io.StringIO(),
-                tovarna_modelu=lambda configuration, n: (FakeModel({}), _evaluator())) == 0
+    assert main(["porovnat"], root=app_root, output=io.StringIO(),
+                model_factory=lambda configuration, n: (FakeModel({}), _evaluator())) == 0
     assert (live / "porovnani.html").exists() and not (demo / "porovnani.html").exists()
 
 
@@ -435,18 +435,19 @@ def test_cli_compare_only_demo_runs_returns_2(app_root, monkeypatch):
     _completed_run_cli(app_root, dry_run=True)
     monkeypatch.setenv("OPENAI_API_KEY", "test-klic")
     out = io.StringIO()
-    assert main(["porovnat"], koren=app_root, vystup=out,
-                tovarna_modelu=lambda configuration, n: (FakeModel({}), _evaluator())) == 2
+    assert main(["porovnat"], root=app_root, output=out,
+                model_factory=lambda configuration, n: (FakeModel({}), _evaluator())) == 2
     assert "ukázkové" in out.getvalue()
 
 
-def test_cli_compare_without_directory(app_root, monkeypatch):
+@pytest.mark.parametrize("command", ["compare", "porovnat"])
+def test_cli_compare_without_directory(app_root, monkeypatch, command):
     directory, run_writer = _completed_run_cli(app_root)
     monkeypatch.setenv("OPENAI_API_KEY", "test-klic")
     writer, evaluator = FakeModel({}, name="claude-falesny"), _evaluator()
     out = io.StringIO()
-    assert main(["porovnat"], koren=app_root, vystup=out,
-                tovarna_modelu=lambda configuration, dry_run: (writer, evaluator)) == 0
+    assert main([command], root=app_root, output=out,
+                model_factory=lambda configuration, dry_run: (writer, evaluator)) == 0
     assert (directory / "porovnani.html").exists()
     assert [step for step, *_ in evaluator.calls] == STEPS
     assert any(MARKER in z for _, _, z in evaluator.calls)
@@ -463,7 +464,7 @@ def test_cli_compare_requires_only_openai_key(app_root, monkeypatch):
     settings.write_text(settings.read_text(encoding="utf-8").replace("mode: subscription", "mode: api"),
                          encoding="utf-8")
     out = io.StringIO()
-    assert main(["porovnat"], koren=app_root, vystup=out) == 2
+    assert main(["porovnat"], root=app_root, output=out) == 2
     assert "OPENAI_API_KEY" in out.getvalue() and "ANTHROPIC_API_KEY" not in out.getvalue()
 
 
@@ -474,8 +475,8 @@ def test_cli_compare_directory_and_reference(app_root, monkeypatch, tmp_path):
     alternate.write_text("# Jiná reference JINA-ZNACKA", encoding="utf-8")
     monkeypatch.setenv("OPENAI_API_KEY", "test-klic")
     evaluator = _evaluator()
-    assert main(["porovnat", directory.name, "--reference", str(alternate)], koren=app_root, vystup=io.StringIO(),
-                tovarna_modelu=lambda configuration, dry_run: (FakeModel({}), evaluator)) == 0
+    assert main(["porovnat", directory.name, "--reference", str(alternate)], root=app_root, output=io.StringIO(),
+                model_factory=lambda configuration, dry_run: (FakeModel({}), evaluator)) == 0
     assert "JINA-ZNACKA" in evaluator.calls[0][2]
 
 
@@ -484,8 +485,8 @@ def test_cli_compare_ambiguous_reference(app_root, monkeypatch):
     (app_root / "examples" / "druha.md").write_text("# Druhá", encoding="utf-8")
     monkeypatch.setenv("OPENAI_API_KEY", "test-klic")
     out = io.StringIO()
-    assert main(["porovnat"], koren=app_root, vystup=out,
-                tovarna_modelu=lambda configuration, dry_run: (FakeModel({}), _evaluator())) == 2
+    assert main(["porovnat"], root=app_root, output=out,
+                model_factory=lambda configuration, dry_run: (FakeModel({}), _evaluator())) == 2
     assert "--reference" in out.getvalue()
 
 
@@ -493,28 +494,28 @@ def test_cli_compare_missing_reference(app_root, monkeypatch):
     _completed_run_cli(app_root)
     monkeypatch.setenv("OPENAI_API_KEY", "test-klic")
     out = io.StringIO()
-    assert main(["porovnat", "--reference", "neni.docx"], koren=app_root, vystup=out,
-                tovarna_modelu=lambda configuration, dry_run: (FakeModel({}), _evaluator())) == 2
+    assert main(["porovnat", "--reference", "neni.docx"], root=app_root, output=out,
+                model_factory=lambda configuration, dry_run: (FakeModel({}), _evaluator())) == 2
     assert "neni.docx" in out.getvalue()
 
 
 def test_cli_compare_no_completed_run(app_root, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-klic")
     out = io.StringIO()
-    assert main(["porovnat"], koren=app_root, vystup=out,
-                tovarna_modelu=lambda configuration, dry_run: (FakeModel({}), _evaluator())) == 2
+    assert main(["porovnat"], root=app_root, output=out,
+                model_factory=lambda configuration, dry_run: (FakeModel({}), _evaluator())) == 2
     assert "dokončený" in out.getvalue()
 
 
 def test_cli_compare_explicit_incomplete_run(app_root, monkeypatch):
-    assert main(["--nanecisto"], koren=app_root, vstup_fn=lambda _: "1", vystup=io.StringIO(),
-                tovarna_modelu=lambda configuration, dry_run: (
+    assert main(["--nanecisto"], root=app_root, input_fn=lambda _: "1", output=io.StringIO(),
+                model_factory=lambda configuration, dry_run: (
                     demo_models()[0], FakeModel({'evaluation_1': [ModelError('network', "OpenAI")]}))) == 1
     directory = next((app_root / "output").iterdir())
     monkeypatch.setenv("OPENAI_API_KEY", "test-klic")
     out = io.StringIO()
-    assert main(["porovnat", str(directory)], koren=app_root, vystup=out,
-                tovarna_modelu=lambda configuration, dry_run: (FakeModel({}), _evaluator())) == 2
+    assert main(["porovnat", str(directory)], root=app_root, output=out,
+                model_factory=lambda configuration, dry_run: (FakeModel({}), _evaluator())) == 2
     assert "dokončen" in out.getvalue()
 
 
@@ -523,13 +524,13 @@ def test_cli_compare_model_error_returns_1(app_root, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-klic")
     evaluator = _evaluator(comparison_elements=[ModelError('overloaded', "OpenAI")])
     out = io.StringIO()
-    assert main(["porovnat"], koren=app_root, vystup=out,
-                tovarna_modelu=lambda configuration, dry_run: (FakeModel({}), evaluator)) == 1
-    assert "porovnat.bat" in out.getvalue() and "pokracovat.bat" not in out.getvalue()
+    assert main(["porovnat"], root=app_root, output=out,
+                model_factory=lambda configuration, dry_run: (FakeModel({}), evaluator)) == 1
+    assert "compare.bat" in out.getvalue() and "resume.bat" not in out.getvalue()
     state = Run.open(directory).state
     assert state.status == 'completed'
     assert [s.step for s in state.usage if s.step.startswith("comparison_")] == STEPS[:3]
-    assert "Chyba modelu při porovnání" in (directory / "data" / "beh.log").read_text(encoding="utf-8")
+    assert "Model error during comparison" in (directory / "data" / "beh.log").read_text(encoding="utf-8")
 
 
 def test_cli_compare_saves_raw_response(app_root, monkeypatch):
@@ -537,8 +538,8 @@ def test_cli_compare_saves_raw_response(app_root, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-klic")
     error = ModelError('invalid_output', "OpenAI", detail="x", raw_response="SUROVA-ODPOVED")
     evaluator = _evaluator(comparison_calibration=[error, error])   # still invalid after repair
-    assert main(["porovnat"], koren=app_root, vystup=io.StringIO(),
-                tovarna_modelu=lambda configuration, dry_run: (FakeModel({}), evaluator)) == 1
+    assert main(["porovnat"], root=app_root, output=io.StringIO(),
+                model_factory=lambda configuration, dry_run: (FakeModel({}), evaluator)) == 1
     raw = list((directory / "data").glob("surova_odpoved_porovnani_*.txt"))
     assert len(raw) == 1 and raw[0].read_text(encoding="utf-8") == "SUROVA-ODPOVED"
 
@@ -554,23 +555,23 @@ def test_cli_compare_refreshes_missing_snapshot_prompts(app_root, monkeypatch):
         encoding="utf-8")
     monkeypatch.setenv("OPENAI_API_KEY", "test-klic")
     evaluator = _evaluator()
-    assert main(["porovnat"], koren=app_root, vystup=io.StringIO(),
-                tovarna_modelu=lambda configuration, dry_run: (FakeModel({}), evaluator)) == 0
+    assert main(["porovnat"], root=app_root, output=io.StringIO(),
+                model_factory=lambda configuration, dry_run: (FakeModel({}), evaluator)) == 0
     assert "UPRAVENY-PROMPT" in dict((step, i) for step, i, _ in evaluator.calls)['comparison_elements']
     assert "UPRAVENY-PROMPT" in (snapshot / "porovnani_prvky.md").read_text(encoding="utf-8")
     # Calibration reuses the saved evaluation prompt; hodnoceni.md is not overwritten.
     (app_root / "prompts" / "evaluation.md").write_text("ZMENENY", encoding="utf-8")
     evaluator = _evaluator()
-    assert main(["porovnat"], koren=app_root, vystup=io.StringIO(),
-                tovarna_modelu=lambda configuration, dry_run: (FakeModel({}), evaluator)) == 0
+    assert main(["porovnat"], root=app_root, output=io.StringIO(),
+                model_factory=lambda configuration, dry_run: (FakeModel({}), evaluator)) == 0
     assert "ZMENENY" not in evaluator.calls[0][1]
 
 
 def test_cli_compare_does_not_support_demo_mode(app_root):
     _completed_run_cli(app_root)
     out = io.StringIO()
-    assert main(["--nanecisto", "porovnat"], koren=app_root, vystup=out) == 2
-    assert "--nanecisto" in out.getvalue()
+    assert main(["--nanecisto", "porovnat"], root=app_root, output=out) == 2
+    assert "--dry-run" in out.getvalue()
 
 
 def test_calibration_html_shows_criterion_scores(tmp_path, sources):

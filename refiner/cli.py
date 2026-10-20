@@ -1,9 +1,7 @@
-"""Příkazová řádka (design kap. 8): nový běh, --pokracovat, --nanecisto, porovnat; výběr vstupu a profilu.
+"""Czech console interaction with English commands and retained Czech aliases.
 
-Návratové kódy: 0 hotovo, 1 běh (nebo porovnání) přerušen, uložen a lze ho zopakovat,
-2 chyba konfigurace, vstupu nebo uživatele. Do konzole jdou jen české hlášky; technické detaily zapisuje
-aplikace.dokonci do data/beh.log (žádný konzolový handler logování se tu nepřidává).
-"""
+Exit codes: 0 complete, 1 interrupted/retryable run or comparison, 2 input/configuration
+error. Technical details go to data/beh.log; no console logging handler is installed."""
 from __future__ import annotations
 
 import argparse
@@ -17,15 +15,15 @@ from typing import TextIO
 
 from dotenv import load_dotenv
 
-from refiner.aplikace import (
-    HLASKA_CTRL_C,
-    dokonci,
-    najdi_posledni_beh,
-    obnov_beh,
-    obnov_prompty_porovnani,
-    otevri_dokonceny,
-    porovnej_beh,
-    zahaj_beh,
+from refiner.application import (
+    CTRL_C_MESSAGE,
+    finish_run,
+    find_latest_run,
+    resume_run,
+    refresh_comparison_prompts,
+    open_completed_run,
+    compare_run,
+    start_run,
 )
 from refiner.configuration import (
     ConfigurationError,
@@ -47,34 +45,34 @@ from refiner.input import InputError, find_inputs, find_template, resolve_materi
 
 ROOT = Path(__file__).resolve().parent.parent
 
-KLICE: tuple[tuple[str, Service], ...] = (("ANTHROPIC_API_KEY", "Anthropic"), ("OPENAI_API_KEY", "OpenAI"))
-KLIC_HODNOTITELE: tuple[tuple[str, Service], ...] = (("OPENAI_API_KEY", "OpenAI"),)
+API_KEYS: tuple[tuple[str, Service], ...] = (("ANTHROPIC_API_KEY", "Anthropic"), ("OPENAI_API_KEY", "OpenAI"))
+EVALUATOR_KEY: tuple[tuple[str, Service], ...] = (("OPENAI_API_KEY", "OpenAI"),)
 
-HLASKA_VZOR_ENV = "Vzor najdete v souboru .env.example."
-HLASKA_ENV_KODOVANI = "Soubor .env nelze přečíst – uložte ho v kódování UTF-8."
-HLASKA_ZADNY_VSTUP = "Ve složce input/ není žádná poptávka (DOCX, MD nebo TXT)."
-HLASKA_ZADNY_PROFIL = "Ve složce profiles/ není žádný profil dokumentu (*.yaml)."
-HLASKA_ZADNY_PRERUSENY = ("Ve složce output/ není žádný přerušený ostrý běh, ve kterém by šlo pokračovat "
-                          "(ukázkové běhy se dokončují s volbou --nanecisto).")
-HLASKA_ZADNY_PRERUSENY_NANECISTO = ("Ve složce output/ není žádný přerušený ukázkový běh (--nanecisto), "
-                                    "ve kterém by šlo pokračovat (ostré běhy se dokončují bez --nanecisto).")
-HLASKA_ZADNY_DOKONCENY = ("Ve složce output/ není žádný dokončený ostrý běh, který by šlo porovnat "
-                          "s referencí (ukázkové běhy --nanecisto se neporovnávají).")
-HLASKA_POROVNAT_VOLBY = ("Příkaz porovnat nejde kombinovat s --nanecisto ani --pokracovat "
+ENV_EXAMPLE_MESSAGE = "Vzor najdete v souboru .env.example."
+ENV_ENCODING_MESSAGE = "Soubor .env nelze přečíst – uložte ho v kódování UTF-8."
+NO_INPUT_MESSAGE = "Ve složce input/ není žádná poptávka (DOCX, MD nebo TXT)."
+NO_PROFILE_MESSAGE = "Ve složce profiles/ není žádný profil dokumentu (*.yaml)."
+NO_INTERRUPTED_MESSAGE = ("Ve složce output/ není žádný přerušený ostrý běh, ve kterém by šlo pokračovat "
+                          '(ukázkové běhy se dokončují s volbou --dry-run).')
+NO_INTERRUPTED_DEMO_MESSAGE = ('Ve složce output/ není žádný přerušený ukázkový běh (--dry-run), '
+                                    've kterém by šlo pokračovat (ostré běhy se dokončují bez --dry-run).')
+NO_COMPLETED_MESSAGE = ("Ve složce output/ není žádný dokončený ostrý běh, který by šlo porovnat "
+                          's referencí (ukázkové běhy --dry-run se neporovnávají).')
+COMPARE_OPTIONS_MESSAGE = ('Příkaz compare nejde kombinovat s --dry-run ani --resume '
                          "(porovnání volá skutečný model GPT).")
-HLASKA_KONEC_VSTUPU = "Volba nebyla zadána (konec vstupu)."
-HLASKA_NANECISTO = "Ukázkový režim --nanecisto: falešné modely, bez volání API a bez nákladů."
+END_OF_INPUT_MESSAGE = "Volba nebyla zadána (konec vstupu)."
+DRY_RUN_MESSAGE = 'Ukázkový režim --dry-run: falešné modely, bez volání API a bez nákladů.'
 
-PRERUSENE_STAVY = {'interrupted', 'running'}
+INTERRUPTED_STATUSES = {'interrupted', 'running'}
 
-TovarnaModelu = Callable[[Configuration, bool], tuple[Model, Model]]
+ModelFactory = Callable[[Configuration, bool], tuple[Model, Model]]
 
 
-# ---------------------------------------------------------------- konzole
+# ---------------------------------------------------------------- console
 
-def _priprav_proud(proud: TextIO) -> None:
-    """Přepne proud na UTF-8 s náhradou nezobrazitelných znaků, pokud to proud umí."""
-    reconfigure = getattr(proud, "reconfigure", None)
+def _prepare_stream(stream: TextIO) -> None:
+    """Configure UTF-8 with replacement when the stream supports reconfigure."""
+    reconfigure = getattr(stream, "reconfigure", None)
     if reconfigure is None:
         return
     try:
@@ -83,124 +81,120 @@ def _priprav_proud(proud: TextIO) -> None:
         pass
 
 
-class _Konzole:
-    """Jediné místo, kudy jdou hlášky do konzole; po každém zápisu flush().
+class _Console:
+    """Flush each console write and append completion text to an unfinished progress line."""
 
-    Hláška končící „…“ zůstane rozepsaná na řádku a následné „hotovo…“ se připíše za ni
-    (`[3/12] Hodnocení 1… hotovo, skóre 7,9`).
-    """
+    def __init__(self, stream: TextIO | None):
+        self._stream = stream
+        self._unfinished = False
 
-    def __init__(self, proud: TextIO | None):
-        self._proud = proud
-        self._rozepsano = False
-
-    def _zapis(self, text: str) -> None:
-        if self._proud is None:
+    def _write(self, text: str) -> None:
+        if self._stream is None:
             return
         try:
-            self._proud.write(text)
+            self._stream.write(text)
         except UnicodeEncodeError:
-            kodovani = getattr(self._proud, "encoding", None) or "ascii"
-            self._proud.write(text.encode(kodovani, errors="replace").decode(kodovani))
-        self._proud.flush()
+            encoding = getattr(self._stream, "encoding", None) or "ascii"
+            self._stream.write(text.encode(encoding, errors="replace").decode(encoding))
+        self._stream.flush()
 
     def __call__(self, text: str) -> None:
-        if self._rozepsano:
-            self._rozepsano = False
+        if self._unfinished:
+            self._unfinished = False
             if text.startswith("hotovo"):
-                self._zapis(f" {text}\n")
+                self._write(f" {text}\n")
                 return
-            self._zapis("\n")
+            self._write("\n")
         if text.endswith("…"):
-            self._zapis(text)
-            self._rozepsano = True
+            self._write(text)
+            self._unfinished = True
         else:
-            self._zapis(f"{text}\n")
+            self._write(f"{text}\n")
 
     def finish(self) -> None:
-        if self._rozepsano:
-            self._rozepsano = False
-            self._zapis("\n")
+        if self._unfinished:
+            self._unfinished = False
+            self._write("\n")
 
 
-def _vyber(konzole: _Konzole, vstup_fn: Callable[[str], str], otazka: str, moznosti: list[str]) -> int:
-    """Očíslovaný výběr; neplatná volba se zopakuje. Vrací index zvolené možnosti."""
-    konzole(otazka)
-    for i, moznost in enumerate(moznosti, start=1):
-        konzole(f"  {i}) {moznost}")
-    n = len(moznosti)
+def _choose(console: _Console, input_fn: Callable[[str], str], question: str, options: list[str]) -> int:
+    """Offer numbered options, retry invalid answers, and return the selected zero-based index."""
+    console(question)
+    for i, option in enumerate(options, start=1):
+        console(f"  {i}) {option}")
+    n = len(options)
     while True:
-        odpoved = vstup_fn(f"Zadejte číslo 1–{n}: ").strip()
-        if odpoved.isdigit() and 1 <= int(odpoved) <= n:
-            return int(odpoved) - 1
-        konzole(f"Neplatná volba „{odpoved}“. Zadejte číslo 1–{n}.")
+        answer = input_fn(f"Zadejte číslo 1–{n}: ").strip()
+        if answer.isdigit() and 1 <= int(answer) <= n:
+            return int(answer) - 1
+        console(f"Neplatná volba „{answer}“. Zadejte číslo 1–{n}.")
 
 
-# ---------------------------------------------------------------- příprava běhu
+# ---------------------------------------------------------------- run preparation
 
-def _vychozi_tovarna(konfigurace: Configuration, nanecisto: bool) -> tuple[Model, Model]:
-    if nanecisto:
+def _default_model_factory(configuration: Configuration, dry_run: bool) -> tuple[Model, Model]:
+    if dry_run:
         return demo_models()
-    modely = konfigurace.settings.models
-    if modely.mode == "api":
-        return ClaudeModel(modely), GptModel(modely)
-    return ClaudeCliModel(modely), CodexModel(modely)
+    models = configuration.settings.models
+    if models.mode == "api":
+        return ClaudeModel(models), GptModel(models)
+    return ClaudeCliModel(models), CodexModel(models)
 
 
-def _vychozi_hodnotitel(konfigurace: Configuration) -> Model:
-    modely = konfigurace.settings.models
-    return GptModel(modely) if modely.mode == "api" else CodexModel(modely)
+def _default_evaluator(configuration: Configuration) -> Model:
+    models = configuration.settings.models
+    return GptModel(models) if models.mode == "api" else CodexModel(models)
 
 
-def _chybejici_klice(klice: tuple[tuple[str, Service], ...] = KLICE) -> list[Service]:
-    return [sluzba for promenna, sluzba in klice if not os.environ.get(promenna, "").strip()]
+def _missing_keys(keys: tuple[tuple[str, Service], ...] = API_KEYS) -> list[Service]:
+    return [service for variable, service in keys if not os.environ.get(variable, "").strip()]
 
 
-def _otazka_profilu(nazvy: list[str]) -> str:
-    """„Nabídka, nebo směrnice?“ z názvů profilů."""
-    male = [n[:1].lower() + n[1:] for n in nazvy[1:]]
-    casti = [nazvy[0], *male]
-    return ", ".join(casti[:-1]) + ", nebo " + casti[-1] + "?"
+def _profile_question(names: list[str]) -> str:
+    """Build a Czech profile-selection question from profile names."""
+    lowercase = [n[:1].lower() + n[1:] for n in names[1:]]
+    parts = [names[0], *lowercase]
+    return ", ".join(parts[:-1]) + ", nebo " + parts[-1] + "?"
 
 
-def _zvol_profil(koren: Path, konzole: _Konzole, vstup_fn: Callable[[str], str]) -> str:
-    profily = available_profiles(koren / "profiles")
-    if not profily:
-        raise ConfigurationError(HLASKA_ZADNY_PROFIL)
-    if len(profily) == 1:
-        return profily[0]
-    nastaveni = koren / "settings.yaml"
-    nazvy = [load_configuration(nastaveni, koren / "profiles" / f"{p}.yaml").profile.name for p in profily]
-    return profily[_vyber(konzole, vstup_fn, _otazka_profilu(nazvy), nazvy)]
+def _choose_profile(root: Path, console: _Console, input_fn: Callable[[str], str]) -> str:
+    profiles = available_profiles(root / "profiles")
+    if not profiles:
+        raise ConfigurationError(NO_PROFILE_MESSAGE)
+    if len(profiles) == 1:
+        return profiles[0]
+    settings = root / "settings.yaml"
+    names = [load_configuration(settings, root / "profiles" / f"{p}.yaml").profile.name for p in profiles]
+    return profiles[_choose(console, input_fn, _profile_question(names), names)]
 
 
-def _zvol_vstup(koren: Path, konzole: _Konzole, vstup_fn: Callable[[str], str]) -> Path:
-    slozka = koren / "input"
-    vstupy = find_inputs(slozka) if slozka.is_dir() else []
-    if not vstupy:
-        raise InputError(HLASKA_ZADNY_VSTUP)
-    if len(vstupy) == 1:
-        return vstupy[0]
-    return vstupy[_vyber(konzole, vstup_fn, "Kterou poptávku zpracovat?", [p.name for p in vstupy])]
+def _choose_input(root: Path, console: _Console, input_fn: Callable[[str], str]) -> Path:
+    directory = root / "input"
+    inputs = find_inputs(directory) if directory.is_dir() else []
+    if not inputs:
+        raise InputError(NO_INPUT_MESSAGE)
+    if len(inputs) == 1:
+        return inputs[0]
+    return inputs[_choose(console, input_fn, "Kterou poptávku zpracovat?", [p.name for p in inputs])]
 
 
-def _slozka_behu(koren: Path, hodnota: str, stavy: set[str], nanecisto: bool) -> Path | None:
-    """Zadaná složka běhu, nebo poslední běh v output/ ve stejném režimu (ukázkový/ostrý)."""
-    if not hodnota:
-        return najdi_posledni_beh(koren / "output", stavy, nanecisto=nanecisto)
-    cesta = Path(hodnota)
-    if not cesta.is_absolute() and not cesta.exists() and (koren / "output" / cesta).exists():
-        cesta = koren / "output" / cesta
-    return cesta
+def _run_directory(root: Path, value: str, statuses: set[str], dry_run: bool) -> Path | None:
+    """Resolve an explicit run directory or the latest matching run under output/."""
+    if not value:
+        return find_latest_run(root / "output", statuses, dry_run=dry_run)
+    path = Path(value)
+    if not path.is_absolute() and not path.exists() and (root / "output" / path).exists():
+        path = root / "output" / path
+    return path
 
 
-def _cesta_reference(koren: Path, hodnota: str | None) -> Path:
-    if hodnota is None:
-        return find_reference(koren)
-    cesta = Path(hodnota)
-    if not cesta.is_absolute() and not cesta.exists() and (koren / cesta).exists():
-        cesta = koren / cesta
-    return cesta
+def _reference_path(root: Path, value: str | None) -> Path:
+    if value is None:
+        return find_reference(root)
+    path = Path(value)
+    if not path.is_absolute() and not path.exists() and (root / path).exists():
+        path = root / path
+    return path
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -208,147 +202,148 @@ def _parser() -> argparse.ArgumentParser:
         prog="python -m refiner",
         description="Cross-model refiner: Claude píše dokument, GPT ho hodnotí, Claude ho vylepšuje.",
     )
-    p.add_argument("--nanecisto", action="store_true",
+    p.add_argument("--dry-run", "--nanecisto", dest="dry_run", action="store_true",
                    help="ukázkový běh s falešnými modely, bez volání API a bez nákladů")
-    p.add_argument("--pokracovat", nargs="?", const="", default=None, metavar="SLOZKA",
+    p.add_argument("--resume", "--pokracovat", dest="resume", nargs="?", const="", default=None, metavar="SLOZKA",
                    help="dokončí přerušený běh (bez hodnoty poslední přerušený v output/)")
-    podprikazy = p.add_subparsers(dest="prikaz", metavar="PRIKAZ")
-    porovnat = podprikazy.add_parser(
-        "porovnat", help="porovná dokončený běh s referenční nabídkou (volá jen hodnotitele GPT)",
+    subcommands = p.add_subparsers(dest="command", metavar="PRIKAZ")
+    comparison_parser = subcommands.add_parser(
+        "compare", aliases=["porovnat"], help="porovná dokončený běh s referenční nabídkou (volá jen hodnotitele GPT)",
         description="Porovná dokončený běh s ručně dotaženou referenční nabídkou (výstup porovnani.html).",
     )
-    porovnat.add_argument("slozka", nargs="?", default="", metavar="SLOZKA",
+    comparison_parser.set_defaults(command="compare")
+    comparison_parser.add_argument("directory", nargs="?", default="", metavar="SLOZKA",
                           help="složka běhu (bez hodnoty poslední dokončený běh v output/)")
-    porovnat.add_argument("--reference", default=None, metavar="SOUBOR",
+    comparison_parser.add_argument("--reference", default=None, metavar="SOUBOR",
                           help="referenční nabídka (výchozí: jediný soubor ve složce examples/)")
     return p
 
 
-# ---------------------------------------------------------------- hlavní funkce
+# ---------------------------------------------------------------- main entry point
 
 def main(
     argv: list[str] | None = None,
     *,
-    koren: Path | None = None,
-    vstup_fn: Callable[[str], str] = input,
-    vystup: TextIO | None = None,
-    tovarna_modelu: TovarnaModelu | None = None,
-    otevrit_prehled: bool = False,
+    root: Path | None = None,
+    input_fn: Callable[[str], str] = input,
+    output: TextIO | None = None,
+    model_factory: ModelFactory | None = None,
+    open_overview: bool = False,
 ) -> int:
-    """Spustí nový běh nebo pokračuje v přerušeném. Vrací 0 / 1 / 2 (viz docstring modulu)."""
-    proud = vystup if vystup is not None else sys.stdout
-    if proud is not None:
-        _priprav_proud(proud)
-    konzole = _Konzole(proud)
+    """Start, resume, or compare a run; return exit code 0, 1, or 2."""
+    stream = output if output is not None else sys.stdout
+    if stream is not None:
+        _prepare_stream(stream)
+    console = _Console(stream)
     try:
         args = _parser().parse_args(argv)
-    except SystemExit as e:   # --help nebo neplatný argument (argparse vypíše na stderr)
+    except SystemExit as e:   # Help or invalid arguments; argparse writes its own output.
         return e.code if isinstance(e.code, int) else 2
-    # Porovnání volá jen hodnotitele: skutečný GPT (resp. Codex) nepotřebuje Claude.
-    hodnotitel_fn = ((lambda konf: tovarna_modelu(konf, False)[1]) if tovarna_modelu is not None
-                     else _vychozi_hodnotitel)
+    # Comparison needs only the evaluator, so GPT/Codex does not require Claude.
+    evaluator_factory = ((lambda configuration: model_factory(configuration, False)[1]) if model_factory is not None
+                     else _default_evaluator)
     try:
-        return _spust(args, Path(koren) if koren is not None else ROOT, vstup_fn, konzole,
-                      tovarna_modelu or _vychozi_tovarna, hodnotitel_fn, otevrit_prehled)
+        return _run(args, Path(root) if root is not None else ROOT, input_fn, console,
+                      model_factory or _default_model_factory, evaluator_factory, open_overview)
     finally:
-        konzole.finish()
+        console.finish()
 
 
-def _spust(
+def _run(
     args: argparse.Namespace,
-    koren: Path,
-    vstup_fn: Callable[[str], str],
-    konzole: _Konzole,
-    tovarna: TovarnaModelu,
-    hodnotitel_fn: Callable[[Configuration], Model],
-    otevrit_prehled: bool,
+    root: Path,
+    input_fn: Callable[[str], str],
+    console: _Console,
+    model_factory: ModelFactory,
+    evaluator_factory: Callable[[Configuration], Model],
+    open_overview: bool,
 ) -> int:
-    porovnat = args.prikaz == "porovnat"
-    if porovnat and (args.nanecisto or args.pokracovat is not None):
-        konzole(HLASKA_POROVNAT_VOLBY)
+    is_comparison = args.command == "compare"
+    if is_comparison and (args.dry_run or args.resume is not None):
+        console(COMPARE_OPTIONS_MESSAGE)
         return 2
     try:
-        load_dotenv(koren / ".env", encoding="utf-8")
-    except (UnicodeDecodeError, OSError):   # .env uložený v ANSI/cp1250 nebo UTF-16
-        konzole(HLASKA_ENV_KODOVANI)
+        load_dotenv(root / ".env", encoding="utf-8")
+    except (UnicodeDecodeError, OSError):   # .env saved in ANSI/cp1250 or UTF-16
+        console(ENV_ENCODING_MESSAGE)
         return 2
-    if args.nanecisto:
-        konzole(HLASKA_NANECISTO)
+    if args.dry_run:
+        console(DRY_RUN_MESSAGE)
     else:
-        # Oddíl models (a tedy režim) se bere vždy ze settings.yaml v repozitáři, i při --pokracovat.
+        # Mode and model settings always come from repository settings.yaml, including on resume.
         try:
-            rezim = load_settings(koren / "settings.yaml").models.mode
+            mode = load_settings(root / "settings.yaml").models.mode
         except ConfigurationError as e:
-            konzole(str(e))
+            console(str(e))
             return 2
-        if rezim == "api":
-            chybi = _chybejici_klice(KLIC_HODNOTITELE if porovnat else KLICE)
-            for sluzba in chybi:
-                konzole(f"{ModelError('authentication', sluzba).message} {HLASKA_VZOR_ENV}")
-            if chybi:
+        if mode == "api":
+            missing = _missing_keys(EVALUATOR_KEY if is_comparison else API_KEYS)
+            for service in missing:
+                console(f"{ModelError('authentication', service).message} {ENV_EXAMPLE_MESSAGE}")
+            if missing:
                 return 2
 
     try:
-        if porovnat:
-            # Porovnání volá vždy skutečný GPT: ukázkové běhy se přeskočí, resp. odmítnou.
-            slozka = _slozka_behu(koren, args.slozka, {'completed'}, nanecisto=False)
-            if slozka is None:
-                konzole(HLASKA_ZADNY_DOKONCENY)
+        if is_comparison:
+            # Comparison uses a live evaluator, so demo runs are skipped or rejected.
+            directory = _run_directory(root, args.directory, {'completed'}, dry_run=False)
+            if directory is None:
+                console(NO_COMPLETED_MESSAGE)
                 return 2
-            beh, sources = otevri_dokonceny(slozka, koren=koren, nanecisto=False, hlaseni=konzole)
-            obnov_prompty_porovnani(beh, koren / 'prompts')
-            reference = _cesta_reference(koren, args.reference)
+            run, sources = open_completed_run(directory, root=root, dry_run=False, report=console)
+            refresh_comparison_prompts(run, root / 'prompts')
+            reference = _reference_path(root, args.reference)
             reference_md = read_reference(reference)
-            hodnotitel = hodnotitel_fn(sources.configuration)
-            konzole(f"Porovnávám běh {beh.directory} s referencí {reference.name}")
-        elif args.pokracovat is not None:
-            slozka = _slozka_behu(koren, args.pokracovat, PRERUSENE_STAVY, nanecisto=args.nanecisto)
-            if slozka is None:
-                konzole(HLASKA_ZADNY_PRERUSENY_NANECISTO if args.nanecisto else HLASKA_ZADNY_PRERUSENY)
+            evaluator = evaluator_factory(sources.configuration)
+            console(f"Porovnávám běh {run.directory} s referencí {reference.name}")
+        elif args.resume is not None:
+            directory = _run_directory(root, args.resume, INTERRUPTED_STATUSES, dry_run=args.dry_run)
+            if directory is None:
+                console(NO_INTERRUPTED_DEMO_MESSAGE if args.dry_run else NO_INTERRUPTED_MESSAGE)
                 return 2
-            # Oddíl models (limity, časový limit) a ceny z aktuálního settings.yaml, zbytek z kopie běhu.
-            beh, sources = obnov_beh(slozka, koren=koren, nanecisto=args.nanecisto, hlaseni=konzole)
-            konzole(f"Pokračuji v běhu: {beh.directory}")
-            pisatel, hodnotitel = tovarna(sources.configuration, args.nanecisto)
+            # Current model settings/prices override the otherwise frozen snapshot.
+            run, sources = resume_run(directory, root=root, dry_run=args.dry_run, report=console)
+            console(f"Pokračuji v běhu: {run.directory}")
+            writer, evaluator = model_factory(sources.configuration, args.dry_run)
         else:
-            vstup = _zvol_vstup(koren, konzole, vstup_fn)
-            profil = _zvol_profil(koren, konzole, vstup_fn)
-            konfigurace = load_configuration(
-                koren / "settings.yaml",
-                koren / "profiles" / f"{profil}.yaml",
-                criteria_path_for_request(vstup),
+            input = _choose_input(root, console, input_fn)
+            profile_id = _choose_profile(root, console, input_fn)
+            configuration = load_configuration(
+                root / "settings.yaml",
+                root / "profiles" / f"{profile_id}.yaml",
+                criteria_path_for_request(input),
             )
-            pisatel, hodnotitel = tovarna(konfigurace, args.nanecisto)
-            konzole(f"Poptávka: {vstup.name}, profil: {konfigurace.profile.name}")
-            beh, sources = zahaj_beh(koren, vstup, profil, datetime.now(), nanecisto=args.nanecisto)
-            konzole(f"Složka běhu: {beh.directory}")
+            writer, evaluator = model_factory(configuration, args.dry_run)
+            console(f"Poptávka: {input.name}, profil: {configuration.profile.name}")
+            run, sources = start_run(root, input, profile_id, datetime.now(), dry_run=args.dry_run)
+            console(f"Složka běhu: {run.directory}")
     except (ConfigurationError, InputError) as e:
-        konzole(str(e))
+        console(str(e))
         return 2
     except ModelError as e:
-        konzole(e.message)
+        console(e.message)
         return 2
     except EOFError:
-        konzole(HLASKA_KONEC_VSTUPU)
+        console(END_OF_INPUT_MESSAGE)
         return 2
     except KeyboardInterrupt:
-        konzole(HLASKA_CTRL_C)
+        console(CTRL_C_MESSAGE)
         return 2
-    except Exception as e:   # např. poškozený DOCX (pandoc) nebo soubor otevřený jiným programem
-        konzole(f"Běh se nepodařilo připravit: {type(e).__name__}: {e}")
+    except Exception as e:   # For example, damaged DOCX input or a file locked by another program.
+        console(f"Běh se nepodařilo připravit: {type(e).__name__}: {e}")
         return 2
 
-    if porovnat:
-        kod = porovnej_beh(beh, sources, reference_md, hodnotitel, konzole, reference.name)
+    if is_comparison:
+        code = compare_run(run, sources, reference_md, evaluator, console, reference.name)
         html = "porovnani.html"
     else:
-        sablona = find_template(resolve_materials_directory(koren))
-        kod = dokonci(beh, sources, pisatel, hodnotitel, konzole,
-                      sablona)
+        template = find_template(resolve_materials_directory(root))
+        code = finish_run(run, sources, writer, evaluator, console,
+                      template)
         html = "prehled.html"
-    if kod == 0 and otevrit_prehled:
+    if code == 0 and open_overview:
         try:
-            webbrowser.open((beh.directory / html).resolve().as_uri())
+            webbrowser.open((run.directory / html).resolve().as_uri())
         except Exception:
-            pass   # přehled je jen pohodlí navíc; cestu už vypsal dokonci() / porovnej_beh()
-    return kod
+            pass   # Opening the browser is optional; the report path has already been printed.
+    return code

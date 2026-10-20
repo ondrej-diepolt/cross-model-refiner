@@ -21,7 +21,7 @@ def test_profile_output_token_preserves_historical_name(profile_id, token):
 ])
 def test_new_configuration_keeps_czech_snapshots_and_final_exports(tmp_path, repo_root, profile_id, token):
     from refiner.artifacts import PROMPT_SNAPSHOT_NAMES
-    from refiner.aplikace import dokonci, zahaj_beh
+    from refiner.application import finish_run, start_run
     from refiner.data import build_criteria
     from refiner.models.fakes import FakeModel
     from tests.helpers import TEST_REQUIREMENTS, TEST_REQUEST, make_evaluation, scripted_responses
@@ -37,7 +37,7 @@ def test_new_configuration_keeps_czech_snapshots_and_final_exports(tmp_path, rep
     request = root / "input/poptavka.md"
     request.write_text(TEST_REQUEST, encoding="utf-8")
     request.with_suffix(".criteria.yaml").write_text("weights: {}\n", encoding="utf-8")
-    run, sources = zahaj_beh(root, request, profile_id, datetime(2026, 10, 17, 9, 0))
+    run, sources = start_run(root, request, profile_id, datetime(2026, 10, 17, 9, 0))
     assert sources.configuration.profile_id == profile_id
     assert sources.configuration.output_profile_name == token
     assert run.state.output_profile_name == token
@@ -55,7 +55,7 @@ def test_new_configuration_keeps_czech_snapshots_and_final_exports(tmp_path, rep
     criteria = build_criteria(TEST_REQUIREMENTS, sources.configuration.profile_criteria)
     writer_responses, _ = scripted_responses([9.5])
     evaluator = FakeModel({'evaluation_1': [make_evaluation(9.5, criteria=criteria, suggestions=0)]}, name="gpt-fake")
-    assert dokonci(run, sources, FakeModel(writer_responses), evaluator, lambda _: None, None) == 0
+    assert finish_run(run, sources, FakeModel(writer_responses), evaluator, lambda _: None, None) == 0
     assert (run.directory / f"FINALNI_{token}.md").is_file()
     assert (run.directory / f"FINALNI_{token}.docx").is_file()
     assert f'href="FINALNI_{token}.md"' in (run.directory / "prehled.html").read_text(encoding="utf-8")

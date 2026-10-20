@@ -7,7 +7,7 @@ Výsledkem je hotový dokument (DOCX a Markdown) a přehled celého běhu v proh
 
 ## Data a důvěrnost – přečtěte před prvním použitím
 
-- Nástroj posílá **poptávku a profil firmy** (`podklady/`) službám **Anthropic a OpenAI bez
+- Nástroj posílá **poptávku a profil firmy** (`materials/`) službám **Anthropic a OpenAI bez
   jakýchkoli úprav**. Žádná anonymizace neprobíhá.
 - Data z API se podle podmínek obou poskytovatelů standardně nepoužívají k trénování. Nastavení
   organizace (doba uchovávání dat) je ale potřeba ověřit v konzolích obou účtů.
@@ -15,7 +15,7 @@ Výsledkem je hotový dokument (DOCX a Markdown) a přehled celého běhu v proh
   nástroje Claude Code a Codex. Platí pro ně podmínky a nastavení soukromí vašich předplatných
   (Claude Max, ChatGPT), které se od podmínek API mohou lišit – ověřte je v nastavení obou účtů.
 - Poptávka obvykle není důvěrná. Profil firmy obsahuje osobní údaje členů týmu.
-- Příkaz **`porovnat`** (`porovnat.bat`) posílá službě **OpenAI navíc celou referenční nabídku**
+- Příkaz **`compare`** (`compare.bat`) posílá službě **OpenAI navíc celou referenční nabídku**
   z `examples/` – včetně jmen členů týmu, cen a referencí – spolu s generovanou nabídkou
   a poptávkou.
 - **Nástroj se nesmí používat na neveřejné podklady klienta** (jeho předpisy, smlouvy, interní
@@ -26,7 +26,7 @@ Výsledkem je hotový dokument (DOCX a Markdown) a přehled celého běhu v proh
 
 1. Nainstalujte **Python 3.10 nebo novější** z [python.org](https://www.python.org/downloads/).
    Při instalaci zaškrtněte **„Add python.exe to PATH“**.
-2. Výchozí režim je **předplatné** (`modely.rezim: predplatne` v `nastaveni.yaml`) a soubor `.env`
+2. Výchozí režim je **předplatné** (`models.mode: subscription` v `settings.yaml`) a soubor `.env`
    ani API klíče nepotřebuje. Nainstalujte a přihlaste oba nástroje:
    - **Claude Code**: nainstalujte ho a v příkazovém řádku spusťte `claude`, v něm `/login`
      a přihlaste se účtem s předplatným **Max**.
@@ -35,8 +35,8 @@ Výsledkem je hotový dokument (DOCX a Markdown) a přehled celého běhu v proh
    Přihlášení ověříte příkazy `claude auth status` (musí být `authMethod: claude.ai`)
    a `codex login status` (musí být „Logged in using ChatGPT“). Chybí-li nástroj nebo přihlášení,
    nástroj to česky řekne a skončí dřív, než cokoli odešle. Volání čerpají z limitu předplatného;
-   když se vyčerpá, běh se přeruší a po obnovení limitu ho dokončí `pokracovat.bat`.
-3. Dvakrát klikněte na `spustit.bat`. Poprvé si nástroj vytvoří prostředí `.venv` a nainstaluje
+   když se vyčerpá, běh se přeruší a po obnovení limitu ho dokončí `resume.bat`.
+3. Dvakrát klikněte na `run.bat`. Poprvé si nástroj vytvoří prostředí `.venv` a nainstaluje
    knihovny (několik minut, potřebuje internet). Další spuštění už jsou rychlá.
 
 **Klíče z `.env` se v režimu předplatného do nástrojů nikdy nepředávají** – proměnné s API klíči
@@ -44,17 +44,17 @@ a přihlašovacími tokeny se podprocesům odstraní, aby se omylem neúčtovalo
 
 ### Režim API (volitelný)
 
-Chcete-li místo předplatného platit přes API, nastavte v `nastaveni.yaml` `modely.rezim: api`
+Chcete-li místo předplatného platit přes API, nastavte v `settings.yaml` `models.mode: api`
 a zkopírujte soubor `.env.example` jako `.env`. Doplňte do něj oba API klíče
 (`ANTHROPIC_API_KEY` a `OPENAI_API_KEY`; kde je získat, je napsáno přímo v souboru).
 Soubor `.env` nikomu neposílejte a neukládejte do gitu. Chybí-li klíč, nástroj řekne který
-a skončí dřív, než cokoli odešle. V tomto režimu platí oddíly `claude` a `gpt` v `nastaveni.yaml`
+a skončí dřív, než cokoli odešle. V tomto režimu platí oddíly `claude` a `gpt` v `settings.yaml`
 a přehled uvádí odhad ceny v USD.
 
 ## Běžné použití
 
 1. Vložte poptávku (DOCX, MD nebo TXT) do složky `input/`.
-2. Dvakrát klikněte na `spustit.bat`.
+2. Dvakrát klikněte na `run.bat`.
    - Je-li v `input/` víc souborů, vyberete číslem, kterou poptávku zpracovat.
    - Nástroj se zeptá „Nabídka, nebo směrnice?“ (profil dokumentu; směrnice je zatím jen zárodek).
 3. V konzoli uvidíte průběh krok po kroku, např. `[3/12] Hodnocení 1… hotovo, skóre 7,9`.
@@ -81,37 +81,48 @@ nástroj nezná (a proto si je nevymýšlí).
 
 ## Profil firmy
 
-Nástroj zná o vaší firmě jen to, co mu dáte do složky `podklady/` (do gitu se neukládá):
+Nástroj zná o vaší firmě jen to, co mu dáte do složky `materials/` (do gitu se neukládá):
 
-- `podklady/profil_firmy.md` – zkopírujte šablonu `podklady.priklad/profil_firmy.md` a vyplňte
+- `materials/company_profile.md` – zkopírujte šablonu `materials.example/company_profile.md` a vyplňte
   identifikaci, sazby, tým, reference a obchodní podmínky. Bez sazby nástroj nespočítá cenu.
-- `podklady/sablona.docx` (volitelně) – Word dokument, jehož styly (písma, nadpisy, barvy) se
-  použijí pro finální DOCX. Stačí uložit některou firemní nabídku jako `sablona.docx`.
+- `materials/template.docx` (volitelně) – Word dokument, jehož styly (písma, nadpisy, barvy) se
+  použijí pro finální DOCX. Stačí uložit některou firemní nabídku jako `template.docx`.
 
-Všechny další soubory DOCX, MD a TXT v `podklady/` se také předají modelům jako podklady.
+Všechny další soubory DOCX, MD a TXT v `materials/` se také předají modelům jako podklady.
+
+Existuje-li `materials/`, použije se tato složka. Jinak se načte starší složka `podklady/`;
+jejich obsah se neslučuje. Pro DOCX má přednost `template.docx`, jinak `sablona.docx`.
+Oba názvy šablony se vynechávají z textových podkladů posílaných modelům.
+
 
 ## Úprava kritérií a chování
 
 Vše se mění v textových souborech, bez zásahu do kódu. Soubory se kontrolují při startu; chyba
 ohlásí soubor, řádek a co je špatně.
 
-- `nastaveni.yaml` – modely, cílové skóre (výchozí 9,5), maximální počet revizí, váhy skupin
+- `settings.yaml` – modely, cílové skóre (výchozí 9,5), maximální počet revizí, váhy skupin
   kritérií, ceny tokenů.
-- `profily/*.yaml` – profil dokumentu: obecná kritéria kvality (název, popis pro hodnotitele, váha)
+- `profiles/*.yaml` – profil dokumentu: obecná kritéria kvality (název, popis pro hodnotitele, váha)
   a doporučená struktura dokumentu.
-- `input/<název poptávky>.kriteria.yaml` (volitelně) – kritéria navíc nebo jiné váhy jen pro jednu
-  poptávku. Příklad pro poptávku `input/banka.docx` → soubor `input/banka.kriteria.yaml`:
+- `input/<název poptávky>.criteria.yaml` (volitelně) – kritéria navíc nebo jiné váhy jen pro jednu
+  poptávku. Příklad pro poptávku `input/banka.docx` → soubor `input/banka.criteria.yaml`:
 
   ```yaml
-  kriteria_navic:
+  extra_criteria:
     - id: X1
-      nazev: Regulatorní soulad
-      popis: Nabídka konkrétně řeší požadavky DORA.
-      vaha: 0.2
-  vahy: {B1: 0.3}
+      name: Regulatorní soulad
+      description: Nabídka konkrétně řeší požadavky DORA.
+      weight: 0.2
+  weights: {B1: 0.3}
   ```
 
-- `prompty/*.md` – pokyny pro modely v jednotlivých krocích. Proměnné `${...}` doplňuje nástroj;
+Má-li poptávka současně soubory `.criteria.yaml` a starší `.kriteria.yaml`, použije se
+jen `.criteria.yaml`. Starší české klíče konfigurace se dál načítají; nové příklady používají
+anglické klíče. Vestavěné profily jsou `profiles/proposal.yaml` (nabídka) a
+`profiles/policy.yaml` (směrnice), ale výstupy dál nesou názvy `FINALNI_nabidka.*` a
+`FINALNI_smernice.*`.
+
+- `prompts/*.md` – pokyny pro modely v jednotlivých krocích. Proměnné `${...}` doplňuje nástroj;
   znak `$` v běžném textu pište jako `$$`.
 
 Každý běh si do `data/konfigurace/` uloží **kopii** použitého nastavení, profilu a promptů.
@@ -120,23 +131,23 @@ Každý běh si do `data/konfigurace/` uloží **kopii** použitého nastavení,
 
 Když běh skončí chybou (výpadek internetu, došlý kredit, přetížená služba…), nástroj vypíše česky,
 co se stalo, uloží rozpracovaný běh a vytvoří přehled s tím, co už je hotové. Po odstranění příčiny
-dvakrát klikněte na **`pokracovat.bat`** – naváže na posledním přerušeném běhu a hotové kroky už
-neplatí znovu. Konkrétní běh lze dokončit přetažením jeho složky z `output/` na `pokracovat.bat`.
+dvakrát klikněte na **`resume.bat`** – naváže na posledním přerušeném běhu a hotové kroky už
+neplatí znovu. Konkrétní běh lze dokončit přetažením jeho složky z `output/` na `resume.bat`.
 
 Co pokračující běh použije:
 
-- **Nastavení modelů** (oddíl `modely:` – limity tokenů, časový limit, effort, názvy modelů)
-  a ceny tokenů bere z **aktuálního `nastaveni.yaml` v repozitáři**. Když běh skončí hláškou
-  o uříznuté odpovědi nebo o vypršení času, upravte příslušnou hodnotu v `nastaveni.yaml`
-  (např. `max_tokens_json` nebo `max_output_tokens`, `timeout_s`) a spusťte `pokracovat.bat`.
-  Která nastavení se použila, je zapsáno v `data/beh.log`. Je-li `nastaveni.yaml` v repozitáři
+- **Nastavení modelů** (oddíl `models:` – limity tokenů, časový limit, effort, názvy modelů)
+  a ceny tokenů bere z **aktuálního `settings.yaml` v repozitáři**. Když běh skončí hláškou
+  o uříznuté odpovědi nebo o vypršení času, upravte příslušnou hodnotu v `settings.yaml`
+  (např. `max_tokens_json` nebo `max_output_tokens`, `timeout_s`) a spusťte `resume.bat`.
+  Která nastavení se použila, je zapsáno v `data/beh.log`. Je-li `settings.yaml` v repozitáři
   chybný nebo chybí, běh pokračuje s kopií ve složce běhu a vypíše varování.
 - Vše ostatní – cílové skóre a další řízení smyčky, váhy skupin, profil, kritéria a prompty – bere
   z **kopie uložené ve složce běhu** (`data/konfigurace/`), aby skóre zůstalo srovnatelné. Úprava
-  `prompty/`, `profily/` nebo těchto částí `nastaveni.yaml` se projeví až v novém běhu.
+  `prompts/`, `profiles/` nebo těchto částí `settings.yaml` se projeví až v novém běhu.
 
-Ukázkový běh (`--nanecisto`) se dokončuje také s `--nanecisto` (`pokracovat.bat --nanecisto`);
-ostrý běh bez něj. `pokracovat.bat` bez parametru vybírá jen běhy odpovídajícího druhu.
+Ukázkový běh (`--dry-run`) se dokončuje také s `--dry-run` (`resume.bat --dry-run`);
+ostrý běh bez něj. `resume.bat` bez parametru vybírá jen běhy odpovídajícího druhu.
 
 Po Ctrl+C se Windows zeptá „Terminate batch job (Y/N)?“ (česky „Ukončit dávkovou úlohu (A/N)?“).
 Odpověď **N** nechá okno otevřené s hláškou, jak pokračovat; odpověď **Y** okno hned zavře
@@ -151,9 +162,9 @@ a k ověření, že je výsledek reálně použitelný.
    Generování nabídek složku `examples/` nikdy nečte; referenci uvidí jen hodnotitel (GPT)
    při porovnání. Porovnání volá jen hodnotitele GPT (v režimu předplatného Codex, v režimu API
    stačí klíč `OPENAI_API_KEY`).
-2. Dvakrát klikněte na **`porovnat.bat`** – porovná poslední dokončený běh v `output/`. Konkrétní
-   běh porovnáte přetažením jeho složky na `porovnat.bat`. Jiná reference:
-   `porovnat.bat SLOZKA_BEHU --reference cesta\k\nabidce.docx`.
+2. Dvakrát klikněte na **`compare.bat`** – porovná poslední dokončený běh v `output/`. Konkrétní
+   běh porovnáte přetažením jeho složky na `compare.bat`. Jiná reference:
+   `compare.bat SLOZKA_BEHU --reference cesta\k\nabidce.docx`.
 3. Ve složce běhu vznikne **`porovnani.html`** (otevře se v prohlížeči):
    - **Kalibrace hodnotitele** – reference projde stejným hodnocením jako generovaná nabídka.
      Když ani ručně dotažená nabídka nedosáhne cílového skóre, je práh pro tohoto hodnotitele
@@ -167,22 +178,22 @@ a k ověření, že je výsledek reálně použitelný.
 
 Porovnání stojí 5 volání GPT (spotřeba se připíše do `data/beh.json` běhu, stav běhu se nemění)
 a dá se opakovat: výsledky se přepíšou, vyplněný formulář zůstane. Prompty porovnání
-(`prompty/porovnani_*.md`) a nastavení modelů (oddíl `modely:` v `nastaveni.yaml`) se berou vždy
+(`prompts/comparison_*.md`) a nastavení modelů (oddíl `models:` v `settings.yaml`) se berou vždy
 aktuální z repozitáře; kalibrace hodnotí promptem uloženým v běhu, stejně jako generovanou
-nabídku. Ukázkové běhy (`--nanecisto`) porovnat nelze – mají jen falešné texty. Pro férové srovnání vyplňte
-`podklady/profil_firmy.md` stejnými fakty, jaké má reference (sazba, tým, reference) – jinak bude
+nabídku. Ukázkové běhy (`--dry-run`) porovnat nelze – mají jen falešné texty. Pro férové srovnání vyplňte
+`materials/company_profile.md` stejnými fakty, jaké má reference (sazba, tým, reference) – jinak bude
 generovaná nabídka v kapitolách cena, tým a reference z definice horší.
 
 ## Ukázka bez nákladů
 
 ```
-spustit.bat --nanecisto
+run.bat --dry-run
 ```
 
 (v příkazovém řádku ve složce nástroje). Projde celý běh s falešnými modely – bez volání API, bez
 klíčů a zdarma. Výstup má stejnou strukturu jako ostrý běh, texty jsou jen ukázkové. Hodí se pro
 ověření instalace a seznámení s výstupy. Běh je ve svém stavu označen jako ukázkový; pokračovat
-v něm lze jen s `--nanecisto` a s referencí ho porovnat nelze.
+v něm lze jen s `--dry-run` a s referencí ho porovnat nelze.
 
 ## Kolik to stojí
 
@@ -190,14 +201,8 @@ Orientačně **3–6 USD a 15–30 minut** za jeden plný běh (asi 12 volání 
 15 000 tokenů). Odhad není změřený; skutečnou spotřebu tokenů a cenu každého běhu najdete
 v `prehled.html`.
 
-## Pro vývojáře
+## Příkazová řádka a vývoj
 
-```
-.venv\Scripts\python.exe -m refiner [--nanecisto]
-.venv\Scripts\python.exe -m refiner [--nanecisto] --pokracovat [SLOZKA_BEHU]
-.venv\Scripts\python.exe -m refiner porovnat [SLOZKA_BEHU] [--reference SOUBOR]
-.venv\Scripts\python.exe -m pytest
-```
-
-Návratové kódy: 0 hotovo, 1 běh přerušen (lze pokračovat) nebo porovnání selhalo (lze zopakovat),
-2 chyba konfigurace, vstupu nebo chybějící klíč. Testy nevolají síť ani API.
+Hlavní příkazy jsou `--dry-run`, `--resume [SLOZKA]` a `compare [SLOZKA] --reference SOUBOR`.
+Původní názvy `--nanecisto`, `--pokracovat` a `porovnat` dál fungují jako aliasy.
+Pokyny k vývoji, struktuře kódu a testům najdete v [CONTRIBUTING.md](CONTRIBUTING.md).

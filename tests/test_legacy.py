@@ -42,12 +42,12 @@ def test_legacy_state_upgrade_preserves_paths_and_payloads(legacy_interrupted):
 
 
 def test_legacy_resume_does_not_repeat_completed_calls(legacy_interrupted):
-    from refiner.aplikace import obnov_beh
+    from refiner.application import resume_run
     from refiner.loop import run_loop
     from refiner.models.fakes import FakeModel
     from tests.helpers import make_evaluation
 
-    run, sources = obnov_beh(legacy_interrupted)
+    run, sources = resume_run(legacy_interrupted)
     writer = FakeModel({})
     evaluator = FakeModel({"evaluation_2": [make_evaluation(9.5)]}, name="gpt-fake")
     result = run_loop(run, sources, writer, evaluator, lambda _: None)
@@ -59,7 +59,7 @@ def test_legacy_resume_does_not_repeat_completed_calls(legacy_interrupted):
 
 
 def test_missing_saved_score_reuses_evaluation(legacy_interrupted):
-    from refiner.aplikace import obnov_beh
+    from refiner.application import resume_run
     from refiner.data import Evaluation
     from refiner.loop import run_loop
     from refiner.models.fakes import FakeModel
@@ -71,7 +71,7 @@ def test_missing_saved_score_reuses_evaluation(legacy_interrupted):
     del payload["skore"]["1"]
     state_file.write_text(json.dumps(payload), encoding="utf-8")
     old_step = (legacy_interrupted / "data/04_hodnoceni_1.json").read_bytes()
-    run, sources = obnov_beh(legacy_interrupted)
+    run, sources = resume_run(legacy_interrupted)
     writer = FakeModel({})
     evaluator = FakeModel({"evaluation_2": [make_evaluation(9.5)]}, name="gpt-fake")
     run_loop(run, sources, writer, evaluator, lambda _: None)
@@ -86,27 +86,27 @@ def test_missing_saved_score_reuses_evaluation(legacy_interrupted):
 
 @pytest.mark.parametrize("profile", ["custom_offer", "proposal"])
 def test_custom_legacy_output_token_is_not_inferred_from_snapshot_filename(legacy_completed, profile):
-    from refiner.aplikace import otevri_dokonceny
+    from refiner.application import open_completed_run
 
     state_file = legacy_completed / "data/beh.json"
     payload = json.loads(state_file.read_text(encoding="utf-8"))
     payload["profil"] = profile
     state_file.write_text(json.dumps(payload), encoding="utf-8")
-    run, sources = otevri_dokonceny(legacy_completed)
+    run, sources = open_completed_run(legacy_completed)
     assert run.state.output_profile_name == profile
     assert sources.configuration.output_profile_name == profile
 
 
 @pytest.mark.parametrize("invalid", ["{broken", "[]", '{"schema_version": 99}', '{"schema_version": true}'])
 def test_malformed_or_future_state_is_a_czech_input_error_without_overwrite(legacy_interrupted, invalid):
-    from refiner.aplikace import obnov_beh
+    from refiner.application import resume_run
     from refiner.input import InputError
 
     state_file = legacy_interrupted / "data/beh.json"
     state_file.write_text(invalid, encoding="utf-8")
     before = state_file.read_bytes()
     with pytest.raises(InputError, match="Stav běhu.*nelze přečíst"):
-        obnov_beh(legacy_interrupted)
+        resume_run(legacy_interrupted)
     assert state_file.read_bytes() == before
 
 

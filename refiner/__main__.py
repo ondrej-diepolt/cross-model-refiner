@@ -1,5 +1,5 @@
-"""Spuštění: python -m refiner [--nanecisto] | --pokracovat [SLOZKA] | porovnat [SLOZKA] [--reference SOUBOR]."""
+"""Entry point: python -m refiner [--dry-run] | --resume [DIRECTORY] | compare [DIRECTORY] [--reference FILE]."""
 from refiner.cli import main
 
 if __name__ == "__main__":
-    raise SystemExit(main(otevrit_prehled=True))
+    raise SystemExit(main(open_overview=True))

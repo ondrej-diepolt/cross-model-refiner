@@ -8,12 +8,12 @@ from tests.helpers import make_run, make_evaluation, make_criteria, scripted_res
 
 
 def test_legacy_overview_and_markdown_keep_czech_labels(legacy_completed):
-    from refiner.aplikace import otevri_dokonceny
+    from refiner.application import open_completed_run
     from refiner.data import RequirementsOutput, build_criteria
     from refiner.output.markdown import evaluation_markdown, review_markdown
     from tests.helpers import make_review
 
-    run, sources = otevri_dokonceny(legacy_completed)
+    run, sources = open_completed_run(legacy_completed)
     evaluation = run.data("evaluation_1", Evaluation)
     review = make_review(evaluation)
     criteria = build_criteria(run.data("requirements", RequirementsOutput).requirements,
@@ -35,9 +35,9 @@ def test_legacy_overview_and_markdown_keep_czech_labels(legacy_completed):
 
 def test_overview_links_preserve_policy_and_custom_tokens(legacy_completed):
     from dataclasses import replace
-    from refiner.aplikace import otevri_dokonceny
+    from refiner.application import open_completed_run
 
-    run, sources = otevri_dokonceny(legacy_completed)
+    run, sources = open_completed_run(legacy_completed)
     for profile_id, token in (("policy", "smernice"), ("custom_offer", "custom_offer")):
         run.write_fixed(f"FINALNI_{token}.md", "# Dokument\n")
         configuration = replace(sources.configuration, profile_id=profile_id, output_profile_name=token)
@@ -49,9 +49,9 @@ def test_overview_links_preserve_policy_and_custom_tokens(legacy_completed):
 def test_overview_shows_output_token_counts_for_models_and_total(legacy_completed):
     import html as html_module
     import re
-    from refiner.aplikace import otevri_dokonceny
+    from refiner.application import open_completed_run
 
-    run, sources = otevri_dokonceny(legacy_completed)
+    run, sources = open_completed_run(legacy_completed)
     html = create_overview(run, sources.configuration).read_text(encoding="utf-8")
     rows = [[" ".join(html_module.unescape(re.sub(r"<[^>]+>", "", cell)).split())
              for cell in re.findall(r"<t[dh]\b[^>]*>(.*?)</t[dh]>", row, flags=re.S)]
@@ -112,7 +112,7 @@ def test_overview_interrupted_before_evaluation(tmp_path, sources):
         pass
     run.finish('interrupted', error="Spojení vypadlo")
     html = _html(run, sources)
-    assert "Běh byl přerušen" in html and "Spojení vypadlo" in html and "pokracovat.bat" in html
+    assert "Běh byl přerušen" in html and "Spojení vypadlo" in html and "resume.bat" in html
 
 
 def test_overview_running_without_end_time(tmp_path, sources):

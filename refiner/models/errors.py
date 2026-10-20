@@ -15,23 +15,23 @@ CLI_SERVICES: frozenset[Service] = frozenset({"Claude Code", "Codex"})
 
 MESSAGES: dict[ErrorKind, str] = {
     'authentication': "Klíč {key} v souboru .env chybí nebo je neplatný.",
-    'credit': "Došel kredit u {service}. Dobijte kredit a spusťte pokracovat.bat.",
-    'overloaded': "Služba {service} je přetížená, zkuste to za pár minut a spusťte pokracovat.bat.",
-    'network': "Nepodařilo se spojit se službou {service}. Zkontrolujte připojení a spusťte pokracovat.bat.",
-    'timeout': "Služba {service} neodpověděla včas. Zkuste to znovu přes pokracovat.bat.",
+    'credit': "Došel kredit u {service}. Dobijte kredit a spusťte resume.bat.",
+    'overloaded': "Služba {service} je přetížená, zkuste to za pár minut a spusťte resume.bat.",
+    'network': "Nepodařilo se spojit se službou {service}. Zkontrolujte připojení a spusťte resume.bat.",
+    'timeout': "Služba {service} neodpověděla včas. Zkuste to znovu přes resume.bat.",
     'invalid_output': "Model {service} vrátil neplatnou odpověď ani po opravě. Surová odpověď je ve složce data/.",
     'truncated': ("Odpověď modelu {service} byla uříznutá (příliš dlouhá). Zvyšte v souboru "
-                 "settings.yaml limit {limit} a spusťte pokracovat.bat."),
+                 "settings.yaml limit {limit} a spusťte resume.bat."),
     'refused': "Model {service} úlohu odmítl (kategorie: {detail}).",
     'other': "Neočekávaná chyba služby {service}: {detail}",
     'not_installed': ("Nástroj {service} není nainstalovaný (příkaz {command} nebyl nalezen). "
-                        "Nainstalujte ho podle README, nebo v settings.yaml přepněte modely.mode na api."),
+                        "Nainstalujte ho podle README, nebo v settings.yaml přepněte models.mode na api."),
     'not_authenticated': ("Nástroj {service} není přihlášený předplatným. Přihlaste se příkazem {login} "
-                    "a spusťte nástroj znovu (přerušený běh dokončí pokracovat.bat)."),
+                    "a spusťte nástroj znovu (přerušený běh dokončí resume.bat)."),
     'subscription_limit': ("Vyčerpali jste limit předplatného u {service} ({detail}). "
-                           "Až se limit obnoví, spusťte pokracovat.bat."),
+                           "Až se limit obnoví, spusťte resume.bat."),
     'model_unavailable': ("Model {detail} není s vaším předplatným {service} dostupný. "
-                         "Změňte ho v settings.yaml v oddílu modely.subscription."),
+                         "Změňte ho v settings.yaml v oddílu models.subscription."),
 }
 # CLI response lengths are not configurable here, so omit limit instructions.
 _CLI_MESSAGES: dict[ErrorKind, str] = {

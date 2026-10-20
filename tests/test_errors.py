@@ -36,7 +36,7 @@ def test_authentication_message_names_variable():
 def test_truncated_message_explains_limits():
     claude = ModelError('truncated', "Anthropic").message
     gpt = ModelError('truncated', "OpenAI").message
-    assert "uříznutá" in claude and "settings.yaml" in claude and "pokracovat.bat" in claude
+    assert "uříznutá" in claude and "settings.yaml" in claude and "resume.bat" in claude
     assert "max_tokens_json" in claude and "max_output_tokens" not in claude
     assert "max_output_tokens" in gpt and "max_tokens_json" not in gpt
     assert "ani po opakování" not in claude
@@ -63,7 +63,7 @@ def test_detail_does_not_contain_key():
 @pytest.mark.parametrize('service,command', [("Claude Code", "claude"), ("Codex", "codex")])
 def test_not_installed_names_command(service, command):
     h = ModelError('not_installed', service).message
-    assert f"příkaz {command} nebyl nalezen" in h and "modely.mode na api" in h
+    assert f"příkaz {command} nebyl nalezen" in h and "models.mode na api" in h
 
 
 def test_unauthenticated_codex_explains_login():
@@ -76,7 +76,7 @@ def test_unauthenticated_claude_explains_login():
 
 def test_limit_includes_tool_text():
     h = ModelError('subscription_limit', "Claude Code", "You've hit your session limit · resets 3:45pm").message
-    assert "resets 3:45pm" in h and "pokracovat.bat" in h
+    assert "resets 3:45pm" in h and "resume.bat" in h
 
 
 def test_unavailable_model_names_model():

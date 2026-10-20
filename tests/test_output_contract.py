@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 import shutil
 
-from refiner.aplikace import dokonci, obnov_beh, otevri_dokonceny, zahaj_beh
+from refiner.application import finish_run, resume_run, open_completed_run, start_run
 from refiner.run import Run
 from refiner.data import Evaluation, SuggestionReview, RequirementsOutput
 from refiner.models.errors import ModelError
@@ -67,9 +67,9 @@ def _comparison_model() -> FakeModel:
 
 def test_existing_output_paths_and_czech_content(tmp_path, repo_root):
     root = _app_root(tmp_path, repo_root)
-    interrupted, sources = zahaj_beh(root, root / "input/poptavka.md", "nabidka", FIXED_TIME,
-                                    nanecisto=False)
-    assert dokonci(interrupted, sources, *_models(interrupted=True), lambda _: None, None) == 1
+    interrupted, sources = start_run(root, root / "input/poptavka.md", "nabidka", FIXED_TIME,
+                                    dry_run=False)
+    assert finish_run(interrupted, sources, *_models(interrupted=True), lambda _: None, None) == 1
     paths = _paths(interrupted.directory)
     assert paths == _expected("snapshots", "static", "interrupted_steps", "log")
     assert "06_navrh_v2_zmeny.html" in paths
@@ -77,12 +77,12 @@ def test_existing_output_paths_and_czech_content(tmp_path, repo_root):
     assert "data/beh.json" in paths and "prehled.html" in paths
     assert "Běh byl přerušen" in (interrupted.directory / "prehled.html").read_text(encoding="utf-8")
 
-    completed, sources = zahaj_beh(root, root / "input/poptavka.md", "nabidka", FIXED_TIME,
-                                  nanecisto=False)
+    completed, sources = start_run(root, root / "input/poptavka.md", "nabidka", FIXED_TIME,
+                                  dry_run=False)
     assert interrupted.directory.name == "2026-10-17_0900_poptavka"
     assert completed.directory.name == "2026-10-17_0900_poptavka_2"
     messages = []
-    assert dokonci(completed, sources, *_models(), messages.append, None) == 0
+    assert finish_run(completed, sources, *_models(), messages.append, None) == 0
     assert _paths(completed.directory) == _expected("snapshots", "static", "completed_steps", "final_exports", "log")
     assert "Hotovo. Přehled běhu:" in "\n".join(messages)
     final_text = (completed.directory / "FINALNI_nabidka.md").read_text(encoding="utf-8")
@@ -132,9 +132,9 @@ def test_legacy_fixtures_match_current_reader(legacy_interrupted, legacy_complet
         assert _paths(directory) == expected
         assert "${poptavka}" in (directory / "data/konfigurace/prompty/navrh.md").read_text(encoding="utf-8")
 
-    interrupted, _ = obnov_beh(legacy_interrupted, nanecisto=False)
+    interrupted, _ = resume_run(legacy_interrupted, dry_run=False)
     assert interrupted.is_done('draft_2') and not interrupted.is_done('evaluation_2')
     assert interrupted.data('review_1', SuggestionReview).decisions[0].decision == 'accepted'
-    completed, _ = otevri_dokonceny(legacy_completed, nanecisto=False)
+    completed, _ = open_completed_run(legacy_completed, dry_run=False)
     assert completed.state.final_version == 1
     assert "Odpověď: ano, 30 minut" in (legacy_completed / "porovnani_formular.md").read_text(encoding="utf-8")
